@@ -1,1 +1,23 @@
-export type Point={x:number;y:number}; export type MeasurementKind="length"|"area"|"count"; export type ReviewStatus="AI_GENERATED"|"CHECKED"|"AMENDED"|"APPROVED"|"REJECTED"; export type Evidence={source:"drawing"|"dimension"|"schedule"|"specification";ref:string;page?:number}; export type Measurement={id:string;kind:MeasurementKind;itemCode:string;description:string;drawingId:string;geometry:Point[];scaleMmPerUnit:number;quantity:number;unit:"m"|"m²"|"nr";specRef?:string;status:ReviewStatus;evidence:Evidence[]};
+export type Point = { x: number; y: number };
+export type MeasurementKind = "length" | "area" | "count";
+export type ReviewStatus =
+  "AI_GENERATED" | "CHECKED" | "AMENDED" | "APPROVED" | "REJECTED";
+export type Evidence = {
+  source: "drawing" | "dimension" | "schedule" | "specification";
+  ref: string;
+  page?: number;
+};
+export type Measurement = {
+  id: string;
+  kind: MeasurementKind;
+  itemCode: string;
+  description: string;
+  drawingId: string;
+  geometry: Point[];
+  scaleMmPerUnit: number;
+  quantity: number;
+  unit: "m" | "m²" | "nr";
+  specRef?: string;
+  status: ReviewStatus;
+  evidence: Evidence[];
+};

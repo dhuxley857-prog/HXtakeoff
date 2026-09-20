@@ -1,10 +1,1112 @@
 "use client";
-import {useEffect,useMemo,useRef,useState} from "react";
-type Hit={page:number;score:number;sample:string};
-export type BoqDraft={id:string;page:number;room:string;item:string;unit:"m²"|"m"|"nr";qty:number;scope:string;evidence:string;status:"REVIEW";sourcePages?:number[]};
-export default function PdfCanvas({url,onBoq,focusMarkup}:{url:string;onBoq?:(row:BoqDraft)=>void;focusMarkup?:string}){const canvas=useRef<HTMLCanvasElement>(null);const[pages,setPages]=useState(0);const[autoRun,setAutoRun]=useState(true);const[reviewPages,setReviewPages]=useState<number[]>([]);const[reviewIndex,setReviewIndex]=useState(0);const[elevationHits,setElevationHits]=useState<Hit[]>([]);const[markupVisible,setMarkupVisible]=useState(true);const[autoDrafts,setAutoDrafts]=useState<BoqDraft[]>([]);const[scopeLines,setScopeLines]=useState<{page:number,text:string}[]>([]);const[page,setPage]=useState(1);const[hits,setHits]=useState<Hit[]>([]);const[error,setError]=useState("");const[labels,setLabels]=useState<{text:string,x:number,y:number,status:"ROOM"|"REVIEW"}[]>([]);const[activeRoom,setActiveRoom]=useState<string|null>(null);const[vectors,setVectors]=useState<{x1:number,y1:number,x2:number,y2:number}[]>([]);const[nearVectors,setNearVectors]=useState<{x1:number,y1:number,x2:number,y2:number}[]>([]);const[boundary,setBoundary]=useState<{left:number,right:number,top:number,bottom:number,closed:boolean,gaps:number,openings:number}|null>(null);const boundaryEvidence=boundary&&activeRoom?(()=>{const room=labels.find(l=>l.text===activeRoom);const enclosure=boundary.closed?45:0;const continuity=boundary.gaps===0?30:Math.max(0,30-boundary.gaps*15);const anchor=room&&room.x>boundary.left&&room.x<boundary.right&&room.y>boundary.top&&room.y<boundary.bottom?25:0;const score=enclosure+continuity+anchor;return {score,state:score>=90?"HIGH":score>=65?"MEDIUM":"REVIEW",anchor:!!anchor,continuity:boundary.gaps===0}})():null;const[doorRefs,setDoorRefs]=useState<{text:string,x:number,y:number}[]>([]);const[doorSchedule,setDoorSchedule]=useState<Record<string,{page:number,sample:string}>>({});const doorEvidence=(d:{text:string,x:number,y:number})=>{const k=d.text.toUpperCase().replace(/\s+/g,"");const sch=doorSchedule[k];const room=labels.reduce<{text:string,x:number,y:number}|null>((best,l)=>{const dist=Math.hypot(l.x-d.x,l.y-d.y);return dist<14&&(!best||dist<Math.hypot(best.x-d.x,best.y-d.y))?l:best},null);const wall=nearVectors.some(s=>Math.hypot((s.x1+s.x2)/2-d.x,(s.y1+s.y2)/2-d.y)<8);const score=(sch?45:0)+(room?30:0)+(wall?25:0);return {sch,room,wall,score,state:score>=80?"HIGH":score>=50?"MEDIUM":"REVIEW"}};const windowEvidence=(d:{text:string,x:number,y:number})=>{const k=d.text.toUpperCase().replace(/\s+/g,"");const sch=windowSchedule[k];const room=labels.reduce<{text:string,x:number,y:number}|null>((best,l)=>{const dist=Math.hypot(l.x-d.x,l.y-d.y);return dist<18&&(!best||dist<Math.hypot(best.x-d.x,best.y-d.y))?l:best},null);const wall=nearVectors.some(s=>Math.hypot((s.x1+s.x2)/2-d.x,(s.y1+s.y2)/2-d.y)<8);const score=(sch?45:0)+(room?30:0)+(wall?25:0);return {sch,room,wall,score,state:score>=80?"HIGH":score>=50?"MEDIUM":"REVIEW"}};const[autoScale,setAutoScale]=useState<number|null>(null);const[scaleEvidence,setScaleEvidence]=useState<{n:number,spread:number,verified:boolean}>({n:0,spread:999,verified:false});const pageTextIndex=useRef<Record<number,string>>({});const[pageKind,setPageKind]=useState<"PLAN"|"ELEVATION"|"SECTION"|"DETAIL"|"SCHEDULE"|"OTHER">("OTHER");const[fixtureRefs,setFixtureRefs]=useState<{text:string,x:number,y:number}[]>([]);const[windowRefs,setWindowRefs]=useState<{text:string,x:number,y:number}[]>([]);const[windowSchedule,setWindowSchedule]=useState<Record<string,{page:number,sample:string}>>({});const[storeyHeight,setStoreyHeight]=useState<number|null>(null);const[autoRooms,setAutoRooms]=useState<{room:string,left:number,right:number,top:number,bottom:number,area:number,perim:number}[]>([]);const[viewType,setViewType]=useState<"PLAN"|"ELEVATION">("PLAN");const[elevationName,setElevationName]=useState("Elevation");const[elevPts,setElevPts]=useState<{x:number,y:number}[]>([]);const[dimensions,setDimensions]=useState<{text:string,mm:number,x:number,y:number}[]>([]);const[pageSize,setPageSize]=useState<{w:number,h:number}|null>(null);const[calMm,setCalMm]=useState<number|null>(null);const[calPts,setCalPts]=useState<{x:number,y:number}[]>([]);const[measure,setMeasure]=useState(false);const[mpts,setMpts]=useState<{x:number,y:number}[]>([]);
-useEffect(()=>{if(!focusMarkup)return;const m=focusMarkup.match(/^[PE](\d{2})-/);if(m){const p=Number(m[1]);if(p>=1&&p<=pages)setPage(p)}},[focusMarkup,pages]);
-useEffect(()=>{let dead=false;(async()=>{try{const pdfjs=await import("pdfjs-dist");pdfjs.GlobalWorkerOptions.workerSrc=new URL("pdfjs-dist/build/pdf.worker.min.mjs",import.meta.url).toString();const doc=await pdfjs.getDocument(url).promise;if(dead)return;setPages(doc.numPages);const found:Hit[]=[];const textIndex:Record<number,string>={};for(let n=1;n<=doc.numPages;n++){const p=await doc.getPage(n);const tc=await p.getTextContent();const text=(tc.items as any[]).map(x=>x.str||"").join(" ");const low=text.toLowerCase();textIndex[n]=text;let score=0;["ground floor","floor plan","kitchen","living","hall","bedroom"].forEach(k=>{if(low.includes(k))score++});if(score)found.push({page:n,score,sample:text.slice(0,180)});}pageTextIndex.current=textIndex;found.sort((a,b)=>b.score-a.score);setHits(found.slice(0,8));const elev:Hit[]=[];for(let n=1;n<=doc.numPages;n++){const p=await doc.getPage(n);const tc=await p.getTextContent();const text=(tc.items as any[]).map(x=>x.str||"").join(" ");const low=text.toLowerCase();let score=0;["elevation","front elevation","rear elevation","side elevation","north elevation","south elevation","east elevation","west elevation"].forEach(k=>{if(low.includes(k))score++});if(score)elev.push({page:n,score,sample:text.slice(0,180)})}elev.sort((a,b)=>b.score-a.score);setElevationHits(elev.slice(0,8));const rp=Array.from(new Set([...found.slice(0,8).map(x=>x.page),...elev.slice(0,8).map(x=>x.page)])).sort((a,b)=>a-b);setReviewPages(rp);const scopes:{page:number,text:string}[]=[];for(let n=1;n<=doc.numPages;n++){const p=await doc.getPage(n);const tc=await p.getTextContent();const tx=(tc.items as any[]).map(x=>String(x.str||"").trim()).filter(Boolean);const joined=tx.join(" ");joined.split(/(?<=[.;:])\s+/).forEach(s=>{if(/(floor finish|flooring|skirting|ceiling|wall finish|plaster|lining|tile|carpet|vinyl|timber floor|paint)/i.test(s)&&s.length>12&&s.length<280)scopes.push({page:n,text:s.trim()})})}setScopeLines(scopes.slice(0,160));const ds:Record<string,{page:number,sample:string}>={};for(let n=1;n<=doc.numPages;n++){const p=await doc.getPage(n);const tc=await p.getTextContent();const tx=(tc.items as any[]).map(x=>String(x.str||"").trim()).filter(Boolean);const joined=tx.join(" ");if(/door\s+schedule/i.test(joined)){tx.forEach(t=>{if(/^(d\s*\d+[a-z]?|door\s*\d+[a-z]?)$/i.test(t)){const k=t.toUpperCase().replace(/\s+/g,"");ds[k]={page:n,sample:joined.slice(0,220)}}})}}setDoorSchedule(ds);const ws:Record<string,{page:number,sample:string}>={};for(let n=1;n<=doc.numPages;n++){const text=textIndex[n]||"";if(/window\s+schedule/i.test(text)){(text.match(/\b(?:w\s*\d+[a-z]?|window\s*\d+[a-z]?)\b/gi)||[]).forEach(t=>{const k=t.toUpperCase().replace(/\s+/g,"");ws[k]={page:n,sample:text.slice(0,220)}})}}setWindowSchedule(ws);if(found[0])setPage(found[0].page)}catch(e:any){setError(e?.message||"Could not index PDF")}})();return()=>{dead=true}},[url]);
-useEffect(()=>{let dead=false;(async()=>{try{setError("");const pdfjs=await import("pdfjs-dist");const doc=await pdfjs.getDocument(url).promise;const pg=await doc.getPage(page);const tc=await pg.getTextContent();const pageText=(tc.items as any[]).map(x=>String(x.str||"")).join(" ").toLowerCase();setPageKind(/elevation/.test(pageText)?"ELEVATION":/section/.test(pageText)?"SECTION":/schedule/.test(pageText)?"SCHEDULE":/detail/.test(pageText)?"DETAIL":/(floor plan|ground floor|first floor)/.test(pageText)?"PLAN":"OTHER");const base=pg.getViewport({scale:1});setPageSize({w:base.width,h:base.height});const op=await pg.getOperatorList();const segs:{x1:number,y1:number,x2:number,y2:number}[]=[];let path:{x:number,y:number}|null=null;for(let i=0;i<op.fnArray.length;i++){const fn=op.fnArray[i],a:any=op.argsArray[i];if(fn===pdfjs.OPS.moveTo){path={x:a[0],y:a[1]}}else if(fn===pdfjs.OPS.lineTo&&path){const p2={x:a[0],y:a[1]};const q1=base.convertToViewportPoint(path.x,path.y),q2=base.convertToViewportPoint(p2.x,p2.y);segs.push({x1:q1[0]/base.width*100,y1:q1[1]/base.height*100,x2:q2[0]/base.width*100,y2:q2[1]/base.height*100});path=p2}}setVectors(segs.filter(s=>Math.hypot(s.x2-s.x1,s.y2-s.y1)>.35));const DIM=/^(?:\d{3,5}|\d{3,5}\s*mm)$/i;const dimRows=(tc.items as any[]).filter(x=>x.str&&DIM.test(String(x.str).trim())).map(x=>{const text=String(x.str).trim();const pt=base.convertToViewportPoint(x.transform[4],x.transform[5]);return {text,mm:parseInt(text.replace(/\D/g,""),10),x:pt[0]/base.width*100,y:pt[1]/base.height*100}}).filter(d=>d.mm>=300&&d.mm<=30000);setDimensions(dimRows);const likelyHeights=dimRows.filter(d=>d.mm>=2100&&d.mm<=3600).map(d=>d.mm).sort((a,b)=>a-b);const heightMedian=likelyHeights.length?likelyHeights[Math.floor(likelyHeights.length/2)]:null;const heightAgreement=heightMedian?likelyHeights.filter(mm=>Math.abs(mm-heightMedian)/heightMedian<=.01):[];setStoreyHeight(heightAgreement.length>=2?heightMedian:null);const FIXTURE=/^(wc|whb|basin|bath|shower|sink|hob|oven)$/i;setFixtureRefs((tc.items as any[]).filter(x=>x.str&&FIXTURE.test(String(x.str).trim())).map(x=>{const pt=base.convertToViewportPoint(x.transform[4],x.transform[5]);return {text:String(x.str).trim(),x:pt[0]/base.width*100,y:pt[1]/base.height*100}}));const WINDOW=/^(w\s*\d+[a-z]?|window\s*\d+[a-z]?)$/i;setWindowRefs((tc.items as any[]).filter(x=>x.str&&WINDOW.test(String(x.str).trim())).map(x=>{const pt=base.convertToViewportPoint(x.transform[4],x.transform[5]);return {text:String(x.str).trim(),x:pt[0]/base.width*100,y:pt[1]/base.height*100}}));const DOOR=/^(d\s*\d+[a-z]?|door\s*\d+[a-z]?)$/i;setDoorRefs((tc.items as any[]).filter(x=>x.str&&DOOR.test(String(x.str).trim())).map(x=>{const pt=base.convertToViewportPoint(x.transform[4],x.transform[5]);return {text:String(x.str).trim(),x:pt[0]/base.width*100,y:pt[1]/base.height*100}}));const ROOM=/^(sitting room|living room|living|kitchen(?:\s*\/\s*dining)?|dining room|dining|hall|bedroom(?:\s+\d+)?|bathroom|bath|wc|utility(?: room)?|study|garage)$/i;const raw=(tc.items as any[]).filter(x=>x.str&&ROOM.test(String(x.str).trim()));setLabels(raw.map(x=>{const pt=base.convertToViewportPoint(x.transform[4],x.transform[5]);return {text:String(x.str).trim(),x:(pt[0]/base.width)*100,y:(pt[1]/base.height)*100,status:"ROOM" as const}}));const host=canvas.current?.parentElement;const scale=Math.max(.5,Math.min(2,(host?.clientWidth||900)/base.width));const vp=pg.getViewport({scale});const el=canvas.current;if(!el||dead)return;const dpr=window.devicePixelRatio||1;el.width=Math.floor(vp.width*dpr);el.height=Math.floor(vp.height*dpr);el.style.width=vp.width+"px";el.style.height=vp.height+"px";const ctx=el.getContext("2d");if(!ctx)return;await pg.render({canvas:el,canvasContext:ctx,viewport:vp,transform:dpr===1?undefined:[dpr,0,0,dpr,0,0]}).promise}catch(e:any){setError(e?.message||"Could not render PDF")}})();return()=>{dead=true}},[url,page]);
-useEffect(()=>{if(!autoRun||!pageSize||!vectors.length||!dimensions.length)return;const candidates:number[]=[];for(const d of dimensions){const near=vectors.map(s=>{const mx=(s.x1+s.x2)/2,my=(s.y1+s.y2)/2,lenPct=Math.hypot(s.x2-s.x1,s.y2-s.y1),dist=Math.hypot(mx-d.x,my-d.y);return {s,lenPct,dist}}).filter(x=>x.dist<10&&x.lenPct>2).sort((a,b)=>a.dist-b.dist).slice(0,8);for(const x of near){const dx=(x.s.x2-x.s.x1)/100*pageSize.w,dy=(x.s.y2-x.s.y1)/100*pageSize.h,pt=Math.hypot(dx,dy);if(pt>5){const k=d.mm/pt;if(k>.1&&k<100)candidates.push(k)}}}if(!candidates.length)return;candidates.sort((a,b)=>a-b);const med=candidates[Math.floor(candidates.length/2)];const close=candidates.filter(x=>Math.abs(x-med)/med<=.02);const spread=close.length>1?(Math.max(...close)-Math.min(...close))/med:999;const verified=close.length>=2&&spread<=.04;setScaleEvidence({n:close.length,spread,verified});setAutoScale(verified?med:null);if(!verified)return;const rooms=labels.map(l=>{const hs=vectors.filter(s=>Math.abs(s.y2-s.y1)<.45&&Math.hypot((s.x1+s.x2)/2-l.x,(s.y1+s.y2)/2-l.y)<18),vs=vectors.filter(s=>Math.abs(s.x2-s.x1)<.45&&Math.hypot((s.x1+s.x2)/2-l.x,(s.y1+s.y2)/2-l.y)<18);const L=vs.filter(v=>(v.x1+v.x2)/2<l.x).sort((a,b)=>Math.abs((a.x1+a.x2)/2-l.x)-Math.abs((b.x1+b.x2)/2-l.x))[0],R=vs.filter(v=>(v.x1+v.x2)/2>l.x).sort((a,b)=>Math.abs((a.x1+a.x2)/2-l.x)-Math.abs((b.x1+b.x2)/2-l.x))[0],T=hs.filter(v=>(v.y1+v.y2)/2<l.y).sort((a,b)=>Math.abs((a.y1+a.y2)/2-l.y)-Math.abs((b.y1+b.y2)/2-l.y))[0],B=hs.filter(v=>(v.y1+v.y2)/2>l.y).sort((a,b)=>Math.abs((a.y1+a.y2)/2-l.y)-Math.abs((b.y1+b.y2)/2-l.y))[0];if(!L||!R||!T||!B)return null;const left=(L.x1+L.x2)/2,right=(R.x1+R.x2)/2,top=(T.y1+T.y2)/2,bottom=(B.y1+B.y2)/2;if(!(left<l.x&&right>l.x&&top<l.y&&bottom>l.y))return null;const tol=1.2;const hTop=hs.some(v=>Math.abs((v.y1+v.y2)/2-top)<tol&&Math.min(v.x1,v.x2)<=left+tol&&Math.max(v.x1,v.x2)>=right-tol),hBottom=hs.some(v=>Math.abs((v.y1+v.y2)/2-bottom)<tol&&Math.min(v.x1,v.x2)<=left+tol&&Math.max(v.x1,v.x2)>=right-tol),vLeft=vs.some(v=>Math.abs((v.x1+v.x2)/2-left)<tol&&Math.min(v.y1,v.y2)<=top+tol&&Math.max(v.y1,v.y2)>=bottom-tol),vRight=vs.some(v=>Math.abs((v.x1+v.x2)/2-right)<tol&&Math.min(v.y1,v.y2)<=top+tol&&Math.max(v.y1,v.y2)>=bottom-tol);if(!(hTop&&hBottom&&vLeft&&vRight))return null;const w=(right-left)/100*pageSize.w*med/1000,h=(bottom-top)/100*pageSize.h*med/1000;if(w<=.5||h<=.5||w>20||h>20)return null;return {room:l.text,left,right,top,bottom,area:w*h,perim:2*(w+h)}}).filter(Boolean) as any[];setAutoRooms(rooms);if(onBoq){if(pageKind==="SCHEDULE"){const txt=pageTextIndex.current[page]||"";const sanitary=(txt.match(/\b(?:wc|whb|basin|bath|shower|sink)\b/gi)||[]).length;if(sanitary)onBoq({id:"AUTO-"+page+"-SANITARY-SCHEDULE",page,room:"Schedule P"+page,item:"Sanitary fixture schedule references",unit:"nr",qty:sanitary,scope:"Explicit sanitary fixture references indexed from schedule page; review for duplicates and schedule structure.",evidence:"P"+page+" · schedule text index · REVIEW",status:"REVIEW"})}if(rooms.length){if(fixtureRefs.length)onBoq({id:"AUTO-"+page+"-FIXTURES",page,room:"Drawing P"+page,item:"Sanitary / kitchen fixture references",unit:"nr",qty:fixtureRefs.length,scope:"Count of explicit fixture labels detected on drawing; types remain individually reviewable.",evidence:"P"+page+" · explicit fixture-label count · REVIEW",status:"REVIEW"});if(doorRefs.length){const matched=doorRefs.filter(d=>doorEvidence(d).sch);onBoq({id:"AUTO-"+page+"-DOORS",page,room:"Drawing P"+page,item:"Door references / openings",unit:"nr",qty:doorRefs.length,scope:"Explicit door references detected on drawing; "+matched.length+" reconcile to indexed door schedule.",sourcePages:Array.from(new Set(matched.map(d=>doorEvidence(d).sch!.page))),evidence:"P"+page+" · explicit door-tag text count · schedule matches "+matched.length+"/"+doorRefs.length+" · REVIEW",status:"REVIEW"})};if(windowRefs.length){const matched=windowRefs.filter(d=>windowEvidence(d).sch);onBoq({id:"AUTO-"+page+"-WINDOWS",page,room:"Drawing P"+page,item:"Window references / openings",unit:"nr",qty:windowRefs.length,scope:"Explicit window references detected on drawing; "+matched.length+" reconcile to indexed window schedule.",sourcePages:Array.from(new Set(matched.map(d=>windowEvidence(d).sch!.page))),evidence:"P"+page+" · explicit window-tag text count · schedule matches "+matched.length+"/"+windowRefs.length+" · REVIEW",status:"REVIEW"})};for(const r of rooms){const roomRef="P"+String(page).padStart(2,"0")+"-A"+String(rooms.indexOf(r)+1).padStart(2,"0");const perimeterRef="P"+String(page).padStart(2,"0")+"-L"+String(rooms.indexOf(r)+1).padStart(2,"0");const base="AUTO · "+roomRef+" · P"+page+" · median figured-dimension calibration "+med.toFixed(3)+" mm/PDF pt · four-sided vector enclosure verified around room label · REVIEW";onBoq({id:"AUTO-"+page+"-"+r.room+"-FLOOR",page,room:r.room,item:"Floor area / finish",unit:"m²",qty:Number(r.area.toFixed(2)),scope:"Measured from detected room boundary; finish specification to be coordinated from indexed project information.",evidence:base+" · MARKUP "+roomRef,status:"REVIEW"});onBoq({id:"AUTO-"+page+"-"+r.room+"-CEILING",page,room:r.room,item:"Ceiling area / finish",unit:"m²",qty:Number(r.area.toFixed(2)),scope:"Measured from detected room boundary; ceiling build-up/finish to be coordinated from indexed project information.",evidence:base,status:"REVIEW"});onBoq({id:"AUTO-"+page+"-"+r.room+"-SKIRT",page,room:r.room,item:"Skirting / room perimeter",unit:"m",qty:Number(r.perim.toFixed(2)),scope:"Gross detected room perimeter before verified opening deductions.",evidence:base+" · MARKUP "+perimeterRef,status:"REVIEW"});if(storeyHeight){onBoq({id:"AUTO-"+page+"-"+r.room+"-WALLDEC",page,room:r.room,item:"Internal wall decoration / wall finish",unit:"m²",qty:Number((r.perim*storeyHeight/1000).toFixed(2)),scope:"Gross wall area from measured room perimeter × detected storey-height dimension; openings/deductions remain review-controlled.",evidence:base+" · independently repeated height "+storeyHeight+" mm · gross before openings",status:"REVIEW"})}}}},[pageSize,vectors,dimensions,labels,page,storeyHeight,doorRefs.length,windowRefs.length,fixtureRefs.length,autoRun,pageKind]);
-const mmPerPt=(()=>{if(!calMm||calPts.length!==2||!pageSize)return null;const dx=(calPts[1].x-calPts[0].x)/100*pageSize.w,dy=(calPts[1].y-calPts[0].y)/100*pageSize.h,d=Math.hypot(dx,dy);return d>0?calMm/d:null})();const elevationAreaM2=(()=>{const scale=mmPerPt||autoScale;if(viewType!=="ELEVATION"||!scale||!pageSize||elevPts.length<3)return null;let a=0;for(let i=0;i<elevPts.length;i++){const j=(i+1)%elevPts.length;const x1=elevPts[i].x/100*pageSize.w,y1=elevPts[i].y/100*pageSize.h,x2=elevPts[j].x/100*pageSize.w,y2=elevPts[j].y/100*pageSize.h;a+=x1*y2-x2*y1}return Math.abs(a/2)*scale*scale/1e6})();const addElevationBoq=()=>{if(!onBoq||elevationAreaM2===null)return;const sc=scopeFor(/(brick|masonry|render|cladding|external wall|facade|façade)/i);onBoq({id:"ELEV-"+page+"-FACADE",page,room:elevationName,item:"External wall / façade gross area",unit:"m²",qty:Number(elevationAreaM2.toFixed(2)),scope:sc.length?sc.map(s=>s.text).join(" | "):"Gross elevation area measured from marked elevation polygon; finish/build-up requires scope review.",sourcePages:Array.from(new Set([...sc.map(s=>s.page),...packageRefs(/brick|masonry|render|cladding|external wall|facade|façade/i)])),evidence:"E"+String(page).padStart(2,"0")+"-F01 · P"+page+" · marked elevation polygon · "+(mmPerPt?"manual figured-dimension calibration":"auto calibration candidate")+" · gross before verified openings",status:"REVIEW"});setAutoDrafts([{id:"ELEV-"+page+"-FACADE",page,room:elevationName,item:"External wall / façade gross area",unit:"m²",qty:Number(elevationAreaM2.toFixed(2)),scope:"Gross elevation markup",evidence:"E"+String(page).padStart(2,"0")+"-F01 · P"+page,status:"REVIEW"}])};const areaM2=(()=>{if(!mmPerPt||!pageSize||mpts.length<3)return null;let a=0;for(let i=0;i<mpts.length;i++){const j=(i+1)%mpts.length;const x1=mpts[i].x/100*pageSize.w,y1=mpts[i].y/100*pageSize.h,x2=mpts[j].x/100*pageSize.w,y2=mpts[j].y/100*pageSize.h;a+=x1*y2-x2*y1}return Math.abs(a/2)*mmPerPt*mmPerPt/1e6})();const boundaryAreaM2=(()=>{if(!boundary?.closed||!mmPerPt||!pageSize)return null;const w=(boundary.right-boundary.left)/100*pageSize.w*mmPerPt/1000,h=(boundary.bottom-boundary.top)/100*pageSize.h*mmPerPt/1000;return w>0&&h>0?w*h:null})();const boundaryPerimM=(()=>{if(!boundary?.closed||!mmPerPt||!pageSize)return null;const w=(boundary.right-boundary.left)/100*pageSize.w*mmPerPt/1000,h=(boundary.bottom-boundary.top)/100*pageSize.h*mmPerPt/1000;return 2*(w+h)})();const packageRefs=(rx:RegExp)=>Object.entries(pageTextIndex.current).filter(([,t])=>{rx.lastIndex=0;return rx.test(t)}).map(([p])=>Number(p)).slice(0,12);const scopeFor=(rx:RegExp,room?:string)=>{const rr=room?.toLowerCase();const direct=scopeLines.filter(s=>(!rr||s.text.toLowerCase().includes(rr))&&rx.test(s.text));const general=scopeLines.filter(s=>rx.test(s.text));return [...direct,...general.filter(g=>!direct.includes(g))].slice(0,3)};const scopeForRoom=(()=>{if(!activeRoom)return [];const r=activeRoom.toLowerCase();const direct=scopeLines.filter(s=>s.text.toLowerCase().includes(r));const general=scopeLines.filter(s=>/(floor finish|flooring|floor finish|tile|carpet|vinyl|timber floor)/i.test(s.text));return [...direct,...general.filter(g=>!direct.includes(g))].slice(0,3)})();const emit=(rows:BoqDraft[])=>{rows.forEach(r=>onBoq?.(r));setAutoDrafts(rows)};const buildRoomBoq=()=>{if(!activeRoom||!boundaryAreaM2||!boundaryPerimM||!calMm)return;const mk=(item:string,unit:"m²"|"m"|"nr",qty:number,rx:RegExp,id:string)=>{const sc=scopeFor(rx,activeRoom);return {id:activeRoom+"-"+id+"-P"+page,page,room:activeRoom,item,unit,qty:Number(qty.toFixed(2)),scope:sc.length?sc.map(s=>s.text).join(" | "):"No matching scope text found in indexed project documents — review required.",sourcePages:Array.from(new Set(sc.map(s=>s.page))),evidence:"P"+page+" · figured dimension "+calMm+" mm · "+(boundaryEvidence?boundaryEvidence.state+" boundary evidence":"boundary candidate"),status:"REVIEW" as const}};const rows:BoqDraft[]=[mk("Floor finish / floor area","m²",boundaryAreaM2,/(floor finish|flooring|tile|carpet|vinyl|timber floor)/i,"FLOOR"),mk("Ceiling finish / ceiling area","m²",boundaryAreaM2,/(ceiling|plasterboard|skim|paint)/i,"CEILING"),mk("Skirting / room perimeter","m",boundaryPerimM,/(skirting|baseboard|timber trim)/i,"SKIRTING")];const doors=doorRefs.filter(d=>labels.some(l=>l.text===activeRoom&&Math.hypot(l.x-d.x,l.y-d.y)<14));if(doors.length)rows.push(mk("Doors associated with room","nr",doors.length,/(door|ironmongery|frame|lining)/i,"DOORS"));emit(rows)};const addBoq=()=>{if(!onBoq||!activeRoom||areaM2===null||!mmPerPt||mpts.length<3)return;const scope=scopeForRoom.length?scopeForRoom.map(s=>s.text).join(" | "):"No matching floor-finish scope text found in indexed PDF — review required.";onBoq({id:activeRoom+"-FLOOR-P"+page,page,room:activeRoom,item:"Floor finish / floor area",unit:"m²",qty:Number(areaM2.toFixed(2)),scope,evidence:"P"+page+" · figured dimension "+calMm+" mm · "+mpts.length+" point polygon · "+(boundaryEvidence?boundaryEvidence.state+" boundary evidence":"manual trace"),status:"REVIEW"})};const area=(()=>{if(mpts.length<3)return 0;let a=0;for(let i=0;i<mpts.length;i++){const j=(i+1)%mpts.length;a+=mpts[i].x*mpts[j].y-mpts[j].x*mpts[i].y}return Math.abs(a/2)})();return <div style={{position:"absolute",inset:0,overflow:"auto",background:"#dfe3e5"}}><div style={{position:"sticky",top:0,zIndex:4,padding:6,display:"flex",gap:8,alignItems:"center",justifyContent:"center",background:"#17232ef2",color:"white"}}><button disabled={page<=1} onClick={()=>setPage(v=>v-1)}>‹</button>{reviewPages.length>0&&<button onClick={()=>{const i=(reviewIndex-1+reviewPages.length)%reviewPages.length;setReviewIndex(i);setPage(reviewPages[i])}}>← REVIEW</button>}<span>Page {page}{pages?" / "+pages:""} · {pageKind}</span><button disabled={!pages||page>=pages} onClick={()=>setPage(v=>v+1)}>›</button>{reviewPages.length>0&&<button onClick={()=>{const i=(reviewIndex+1)%reviewPages.length;setReviewIndex(i);setPage(reviewPages[i])}}>REVIEW →</button>}{hits[0]&&<button onClick={()=>setViewType("PLAN");setElevPts([]);setPage(hits[0].page)} style={{marginLeft:8}}>GROUND PLAN · P{hits[0].page}</button>}{elevationHits[0]&&<button onClick={()=>setViewType("ELEVATION");setElevationName("Elevation P"+elevationHits[0].page);setElevPts([]);setPage(elevationHits[0].page)}>ELEVATIONS · P{elevationHits[0].page}</button>}<select value={calMm??""} onChange={e=>{setCalMm(e.target.value?Number(e.target.value):null);setCalPts([])}}><option value="">CALIBRATE · figured dimension</option>{dimensions.slice(0,30).map((d,i)=><option key={i} value={d.mm}>{d.text} mm</option>)}</select><button onClick={()=>setAutoRun(v=>!v)}>{autoRun?"AUTO TAKE-OFF ON":"AUTO TAKE-OFF OFF"}</button><button onClick={()=>setMarkupVisible(v=>!v)}>{markupVisible?"HIDE MARKUP":"SHOW MARKUP"}</button>{viewType==="ELEVATION"&&<button onClick={()=>setElevPts([])}>TRACE FACADE</button>}<button onClick={()=>{setMeasure(v=>!v);setMpts([])}}>{measure?"FINISH AREA":"TRACE AREA"}</button>{autoScale?<span>AUTO SCALE · {autoScale.toFixed(3)} mm/PDF pt · {scaleEvidence.n} agreeing dimensions · VERIFIED CANDIDATE</span>:dimensions.length>0?<span>AUTO SCALE · UNVERIFIED · {scaleEvidence.n} agreeing dimensions</span>:null}{calMm&&<span>{calPts.length<2?"CALIBRATION · tap 2 endpoints":mmPerPt?"CALIBRATED · "+calMm+" mm · "+mmPerPt.toFixed(3)+" mm/PDF pt":"CALIBRATION INVALID"}</span>}{viewType==="ELEVATION"&&elevPts.length>2&&<><span>FACADE · {elevationAreaM2!==null?elevationAreaM2.toFixed(2)+" m²":"CALIBRATION REQUIRED"}</span>{elevationAreaM2!==null&&<button onClick={addElevationBoq}>ADD FACADE TO BOQ</button>}</>}{measure&&<span>{mpts.length} pts · {areaM2!==null?areaM2.toFixed(2)+" m²":area.toFixed(1)+" drawing²"}</span>}{areaM2!==null&&activeRoom&&<button onClick={addBoq}>ADD TRACE TO BOQ</button>}{boundaryAreaM2!==null&&activeRoom&&<button onClick={buildRoomBoq}>BUILD ROOM BOQ</button>}</div>{hits.length>0&&<div style={{position:"sticky",top:38,zIndex:3,padding:"5px 10px",fontSize:11,background:"#fff8",backdropFilter:"blur(4px)"}}>HX indexed {pages} pages · plans: {hits.map(h=>"P"+h.page).join(", ")}{elevationHits.length?" · elevations: "+elevationHits.map(h=>"P"+h.page).join(", "):""}</div>}{error?<div style={{padding:20}}>{error}</div>:<div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();const p={x:(e.clientX-r.left)/r.width*100,y:(e.clientY-r.top)/r.height*100};if(calMm&&calPts.length<2){setCalPts(v=>[...v,p]);return}if(viewType==="ELEVATION"){setElevPts(v=>[...v,p]);return}if(measure)setMpts(v=>[...v,p])}} style={{position:"relative",width:"fit-content",margin:"12px auto",cursor:measure?"crosshair":"default"}}><canvas ref={canvas} style={{display:"block",background:"white",boxShadow:"0 2px 12px #0002"}}/><svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none"}}>{markupVisible&&autoRooms.map((r,i)=><g key={"ar"+i}><rect x={r.left} y={r.top} width={r.right-r.left} height={r.bottom-r.top} fill={focusMarkup==="P"+String(page).padStart(2,"0")+"-A"+String(i+1).padStart(2,"0")?"rgba(198,162,75,.30)":"rgba(198,162,75,.10)"} stroke="#c6a24b" strokeWidth={focusMarkup==="P"+String(page).padStart(2,"0")+"-A"+String(i+1).padStart(2,"0")?".7":".32"}/><text x={r.left+0.5} y={r.top+1.8} fontSize="1.35" fill="#8b6d24">{"P"+String(page).padStart(2,"0")+"-A"+String(i+1).padStart(2,"0")+" · "+r.room+" · "+r.area.toFixed(2)+" m²"}</text></g>)}{markupVisible&&activeRoom&&nearVectors.map((s,i)=><line key={"v"+i} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} stroke="#2d7058" strokeWidth=".22" opacity=".7"/>)}{markupVisible&&boundary&&<rect x={boundary.left} y={boundary.top} width={boundary.right-boundary.left} height={boundary.bottom-boundary.top} fill={boundary.closed?"rgba(45,112,88,.08)":"none"} stroke={boundary.closed?"#2d7058":"#b45309"} strokeWidth=".35"/>}{calPts.map((p,i)=><circle key={"c"+i} cx={p.x} cy={p.y} r=".8" fill="#b45309"/>)}{calPts.length===2&&<line x1={calPts[0].x} y1={calPts[0].y} x2={calPts[1].x} y2={calPts[1].y} stroke="#b45309" strokeWidth=".4"/>}{markupVisible&&elevPts.length>1&&<><text x={elevPts[0].x} y={Math.max(1,elevPts[0].y-1)} fontSize="1.35" fill="#8b6d24">{"E"+String(page).padStart(2,"0")+"-F01"}</text><polygon points={elevPts.map(p=>p.x+","+p.y).join(" ")} fill="rgba(45,112,88,.13)" stroke="#2d7058" strokeWidth=".5"/></>}{markupVisible&&elevPts.map((p,i)=><circle key={"e"+i} cx={p.x} cy={p.y} r=".65" fill="#2d7058"/>)}{markupVisible&&mpts.length>1&&<polygon points={mpts.map(p=>p.x+","+p.y).join(" ")} fill="rgba(198,162,75,.18)" stroke="#c6a24b" strokeWidth=".45"/>}{markupVisible&&mpts.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r=".65" fill="#c6a24b"/>)}</svg>{markupVisible&&fixtureRefs.map((d,i)=><div key={"f"+i} style={{position:"absolute",left:d.x+"%",top:d.y+"%",transform:"translate(-50%,-50%)",background:"#6b3fa0",color:"white",padding:"1px 3px",fontSize:8,fontWeight:800,pointerEvents:"none"}}>{d.text}</div>)}{markupVisible&&windowRefs.map((d,i)=>{const ev=windowEvidence(d);return <div key={"w"+i} title={"Window evidence: "+d.text+(ev.sch?" · schedule page "+ev.sch.page:" · no schedule match")+" · "+ev.state+" "+ev.score+"%"} style={{position:"absolute",left:d.x+"%",top:d.y+"%",transform:"translate(-50%,-50%)",border:"1px solid #245c8a",background:"#fff9",padding:"1px 3px",fontSize:8,fontWeight:800,color:"#245c8a",pointerEvents:"none"}}>{d.text} · {ev.sch?"SCHEDULE P"+ev.sch.page:"WINDOW REF"} · {ev.state}</div>})}{markupVisible&&doorRefs.map((d,i)=>{const k=d.text.toUpperCase().replace(/\s+/g,"");const ev=doorEvidence(d),sch=ev.sch;return <div key={"d"+i} title={"Door evidence: "+d.text+(sch?" · schedule page "+sch.page:" · no schedule match")+" · "+ev.state+" "+ev.score+"%"} style={{position:"absolute",left:d.x+"%",top:d.y+"%",transform:"translate(-50%,-50%)",border:"1px solid #8b5e34",background:"#fff8",padding:"1px 3px",fontSize:8,fontWeight:800,color:"#8b5e34",pointerEvents:"none"}}>{d.text} · {sch?"SCHEDULE P"+sch.page:"DOOR REF"} · {ev.state}</div>})}{markupVisible&&autoDrafts.length>0&&<div style={{position:"absolute",right:8,bottom:8,zIndex:7,maxWidth:260,background:"#17232eea",color:"white",padding:8,fontSize:10}}><b>MARK-UP / BOQ REVIEW</b>{autoDrafts.map(r=><div key={r.id}>{r.room} · {r.item}: <strong>{r.qty} {r.unit}</strong></div>)}</div>}{markupVisible&&labels.map((l,i)=><div key={i} onClick={e=>{e.stopPropagation();setActiveRoom(l.text);const radius=18;const nv=vectors.filter(s=>{const mx=(s.x1+s.x2)/2,my=(s.y1+s.y2)/2;const near=Math.hypot(mx-l.x,my-l.y)<radius;const dx=Math.abs(s.x2-s.x1),dy=Math.abs(s.y2-s.y1);const axis=dx<.45||dy<.45;const len=Math.hypot(dx,dy);return near&&axis&&len>1&&len<35});setNearVectors(nv);const hs=nv.filter(s=>Math.abs(s.y2-s.y1)<.45),vs=nv.filter(s=>Math.abs(s.x2-s.x1)<.45);const pick=(a:any[],side:(v:any)=>boolean,coord:(v:any)=>number)=>a.filter(side).sort((a,b)=>Math.abs(coord(a)-l.x)-Math.abs(coord(b)-l.x))[0];const lv=pick(vs,v=>(v.x1+v.x2)/2<l.x,v=>(v.x1+v.x2)/2),rv=pick(vs,v=>(v.x1+v.x2)/2>l.x,v=>(v.x1+v.x2)/2);const th=hs.filter(s=>(s.y1+s.y2)/2<l.y).sort((a,b)=>Math.abs((a.y1+a.y2)/2-l.y)-Math.abs((b.y1+b.y2)/2-l.y))[0],bh=hs.filter(s=>(s.y1+s.y2)/2>l.y).sort((a,b)=>Math.abs((a.y1+a.y2)/2-l.y)-Math.abs((b.y1+b.y2)/2-l.y))[0];if(lv&&rv&&th&&bh){const L=(lv.x1+lv.x2)/2,R=(rv.x1+rv.x2)/2,T=(th.y1+th.y2)/2,B=(bh.y1+bh.y2)/2;const tol=1.2;const coversV=(v:any)=>Math.min(v.y1,v.y2)<=T+tol&&Math.max(v.y1,v.y2)>=B-tol;const coversH=(h:any)=>Math.min(h.x1,h.x2)<=L+tol&&Math.max(h.x1,h.x2)>=R-tol;const badV=[lv,rv].filter(v=>!coversV(v)),badH=[th,bh].filter(h=>!coversH(h));const gaps=badV.length+badH.length;const openingLike=(s:any)=>{const len=Math.hypot(s.x2-s.x1,s.y2-s.y1);return len>1&&len<8};const openings=[...badV,...badH].filter(openingLike).length;const unresolved=gaps-openings;setBoundary({left:L,right:R,top:T,bottom:B,closed:L<l.x&&R>l.x&&T<l.y&&B>l.y&&unresolved===0,gaps:unresolved,openings})}else setBoundary(null)}} title={"Verified room-label candidate: "+l.text} style={{position:"absolute",left:l.x+"%",top:l.y+"%",transform:"translate(-50%,-50%)",border:"2px solid #c6a24b",background:"#c6a24b22",padding:"2px 5px",fontSize:10,fontWeight:800,color:"#17232e",pointerEvents:"auto",cursor:"pointer",whiteSpace:"nowrap",outline:activeRoom===l.text?"3px solid #2d7058":"none"}}>{l.text}<span style={{marginLeft:4,fontSize:8,opacity:.7}}>ROOM</span></div>)}</div>}</div>}
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  validateCalibration,
+  type CalibrationEvidence,
+} from "../../lib/takeoff/calibration";
+import { extractPdfLineSegments } from "../../lib/takeoff/pdfVectors";
+import {
+  parseOpeningSchedules,
+  reconcileOpening,
+  rowsFromPositionedText,
+  type OpeningScheduleRow,
+} from "../../lib/takeoff/schedules";
+import {
+  bridgeCollinearGaps,
+  buildClosedTopology,
+  netFacadeArea,
+  netPerimeter,
+  netWallArea,
+  polygonArea,
+  polygonPerimeter,
+  selectRoomPolygon,
+  type Segment,
+  type TopologyPolygon,
+} from "../../lib/takeoff/topology";
+
+type PageKind =
+  "PLAN" | "ELEVATION" | "SECTION" | "DETAIL" | "SCHEDULE" | "MEP" | "OTHER";
+type Hit = { page: number; kind: PageKind; title: string };
+type Label = { text: string; x: number; y: number };
+type Dimension = Label & { mm: number };
+type Vector = { x1: number; y1: number; x2: number; y2: number };
+type Tool =
+  | "inspect"
+  | "calibrate"
+  | "room"
+  | "facade"
+  | "opening"
+  | "gifa"
+  | "area"
+  | "length"
+  | "count";
+type Markup = {
+  ref: string;
+  page: number;
+  kind: "room" | "facade" | "opening" | "gifa" | "work";
+  points: { x: number; y: number }[];
+  label: string;
+  quantity: number;
+  unit: "m²" | "m" | "nr";
+};
+
+export type SourceDocument = { name: string; url: string; revision?: string };
+export type PackManifest = {
+  documents: {
+    name: string;
+    pages: number;
+    fingerprint: string;
+    sheets: {
+      page: number;
+      kind: PageKind;
+      title: string;
+      fingerprint: string;
+      dimensions: number[];
+      openingRefs: string[];
+      clauseFingerprint: string;
+    }[];
+  }[];
+  openingRows: OpeningScheduleRow[];
+};
+export type BoqDraft = {
+  id: string;
+  page: number;
+  room: string;
+  item: string;
+  unit: "m²" | "m" | "nr" | "m³" | "item";
+  qty: number;
+  scope: string;
+  evidence: string;
+  status: "REVIEW" | "UNMEASURED";
+  sourcePages?: number[];
+  markupRef?: string;
+};
+
+const ROOM =
+  /^(sitting room|living room|living|kitchen(?:\s*\/\s*dining)?|kitchen|dining room|dining|hall|bedroom(?:\s+\d+)?|master bedroom|bathroom|bath|wc|utility(?: room)?|study|garage|landing|ensuite|store)$/i;
+const DOOR = /^(d\s*\d+[a-z]?|door\s*\d+[a-z]?)$/i;
+const WINDOW = /^(w\s*\d+[a-z]?|window\s*\d+[a-z]?)$/i;
+const DIM = /^(?:\d{3,5}|\d{3,5}\s*mm)$/i;
+const hash = (text: string) => {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+};
+const classify = (text: string): PageKind => {
+  const t = text.toLowerCase();
+  if (/window schedule|door schedule|schedules/.test(t)) return "SCHEDULE";
+  if (/mep|heating layout|plumbing|electrical/.test(t)) return "MEP";
+  if (/front elevation|rear elevation|side elevation|elevations/.test(t))
+    return "ELEVATION";
+  if (/ground floor plan|first floor plan|floor plan/.test(t)) return "PLAN";
+  if (/section\s+[a-z]-[a-z]/.test(t)) return "SECTION";
+  if (/detail/.test(t)) return "DETAIL";
+  return "OTHER";
+};
+const titleFor = (text: string, page: number, kind: PageKind) =>
+  text
+    .match(
+      /\b(?:GROUND FLOOR PLAN|FIRST FLOOR PLAN|ROOF PLAN|ELEVATIONS?|SCHEDULES?|SECTION\s+[A-Z]-[A-Z])\b/i,
+    )?.[0]
+    ?.replace(/\s+/g, " ") || `${kind} · P${page}`;
+const px = (p: { x: number; y: number }, size: { w: number; h: number }) => ({
+  x: (p.x / 100) * size.w,
+  y: (p.y / 100) * size.h,
+});
+const metricArea = (
+  points: { x: number; y: number }[],
+  size: { w: number; h: number },
+  scale: number,
+) => (polygonArea(points.map((p) => px(p, size))) * scale * scale) / 1e6;
+const metricPerimeter = (
+  points: { x: number; y: number }[],
+  size: { w: number; h: number },
+  scale: number,
+) => (polygonPerimeter(points.map((p) => px(p, size))) * scale) / 1000;
+const metricPolyline = (
+  points: { x: number; y: number }[],
+  size: { w: number; h: number },
+  scale: number,
+) => {
+  const converted = points.map((p) => px(p, size));
+  let length = 0;
+  for (let i = 1; i < converted.length; i++)
+    length += Math.hypot(
+      converted[i].x - converted[i - 1].x,
+      converted[i].y - converted[i - 1].y,
+    );
+  return (length * scale) / 1000;
+};
+const WORK_ITEMS: { label: string; unit: "m²" | "m" | "nr"; rx: RegExp }[] = [
+  { label: "Foundations / substructure", unit: "m", rx: /foundation|footing/i },
+  { label: "Excavation", unit: "m²", rx: /excavat|earthwork/i },
+  {
+    label: "Ground-floor build-up",
+    unit: "m²",
+    rx: /ground floor|slab|dpm|membrane/i,
+  },
+  {
+    label: "External wall construction",
+    unit: "m²",
+    rx: /external wall|brick|stone|render|cladding/i,
+  },
+  {
+    label: "Internal partitions",
+    unit: "m",
+    rx: /partition|stud wall|blockwork/i,
+  },
+  {
+    label: "Roof covering / insulation",
+    unit: "m²",
+    rx: /roof|tile|insulation/i,
+  },
+  {
+    label: "Roof edges / eaves / verges",
+    unit: "m",
+    rx: /eaves|verge|fascia|soffit/i,
+  },
+  { label: "Below-ground drainage", unit: "m", rx: /drain|soil pipe/i },
+  { label: "Rainwater goods", unit: "m", rx: /rainwater|rwp|gutter/i },
+  {
+    label: "Measurable MEP point",
+    unit: "nr",
+    rx: /electrical|socket|light|extract|radiator|plumb/i,
+  },
+];
+
+export default function PdfCanvas({
+  url,
+  sources,
+  onBoq,
+  onManifest,
+  onGifa,
+  focusMarkup,
+}: {
+  url?: string;
+  sources?: SourceDocument[];
+  onBoq?: (row: BoqDraft) => void;
+  onManifest?: (manifest: PackManifest) => void;
+  onGifa?: (floor: string, area: number, evidence: string) => void;
+  focusMarkup?: string;
+}) {
+  const docs = useMemo(
+    () =>
+      sources?.length
+        ? sources
+        : url
+          ? [{ name: "DH415BB-3 Construction Drawing Pack", url }]
+          : [],
+    [sources, url],
+  );
+  const canvas = useRef<HTMLCanvasElement>(null),
+    pdfRef = useRef<any>(null),
+    touchStart = useRef<number | null>(null);
+  const [docIndex, setDocIndex] = useState(0),
+    [page, setPage] = useState(1),
+    [pages, setPages] = useState(0),
+    [pageKind, setPageKind] = useState<PageKind>("OTHER");
+  const [sheetHits, setSheetHits] = useState<Hit[]>([]),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false),
+    [pageSize, setPageSize] = useState<{ w: number; h: number } | null>(null);
+  const [vectors, setVectors] = useState<Vector[]>([]),
+    [labels, setLabels] = useState<Label[]>([]),
+    [dimensions, setDimensions] = useState<Dimension[]>([]),
+    [doorRefs, setDoorRefs] = useState<Label[]>([]),
+    [windowRefs, setWindowRefs] = useState<Label[]>([]);
+  const [schedule, setSchedule] = useState<OpeningScheduleRow[]>([]),
+    [scopeLines, setScopeLines] = useState<{ page: number; text: string }[]>(
+      [],
+    );
+  const [autoScale, setAutoScale] = useState<number | null>(null),
+    [autoCalibration, setAutoCalibration] = useState<ReturnType<
+      typeof validateCalibration
+    > | null>(null),
+    [manualEvidence, setManualEvidence] = useState<CalibrationEvidence[]>([]);
+  const [selectedDim, setSelectedDim] = useState<number | null>(null),
+    [calPts, setCalPts] = useState<{ x: number; y: number }[]>([]),
+    [tool, setTool] = useState<Tool>("inspect"),
+    [trace, setTrace] = useState<{ x: number; y: number }[]>([]);
+  const [selectedRoom, setSelectedRoom] = useState<Label | null>(null),
+    [heightMm, setHeightMm] = useState<number | null>(null),
+    [markups, setMarkups] = useState<Markup[]>([]),
+    [topologyNote, setTopologyNote] = useState("");
+  const [facadeGross, setFacadeGross] = useState<number | null>(null),
+    [openingAreas, setOpeningAreas] = useState<number[]>([]);
+  const [workItem, setWorkItem] = useState(WORK_ITEMS[0].label);
+  const manualCalibration = validateCalibration(manualEvidence),
+    activeScale = manualCalibration.valid
+      ? manualCalibration.mmPerUnit
+      : autoScale,
+    currentDoc = docs[docIndex];
+
+  useEffect(() => {
+    if (!focusMarkup) return;
+    const m = focusMarkup.match(/^[A-Z]+(\d{2})-/);
+    if (m) setPage(Number(m[1]));
+  }, [focusMarkup]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!currentDoc) return;
+      setBusy(true);
+      setError("");
+      try {
+        const pdfjs = await import("pdfjs-dist");
+        pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+          "pdfjs-dist/build/pdf.worker.min.mjs",
+          import.meta.url,
+        ).toString();
+        const openings: OpeningScheduleRow[] = [],
+          scopes: { page: number; text: string }[] = [],
+          manifests: PackManifest["documents"] = [];
+        let activeHits: Hit[] = [],
+          activePdf: any = null;
+        for (let d = 0; d < docs.length; d++) {
+          const source = docs[d],
+            pdf = await pdfjs.getDocument(source.url).promise,
+            hits: Hit[] = [],
+            sheets: PackManifest["documents"][number]["sheets"] = [];
+          let fingerprint = "";
+          for (let n = 1; n <= pdf.numPages; n++) {
+            const pg = await pdf.getPage(n),
+              tc = await pg.getTextContent(),
+              vp = pg.getViewport({ scale: 1 });
+            const items = (tc.items as any[])
+              .filter((x) => x.str)
+              .map((x) => {
+                const p = vp.convertToViewportPoint(
+                  x.transform[4],
+                  x.transform[5],
+                );
+                return { text: String(x.str).trim(), x: p[0], y: p[1] };
+              });
+            const text = items.map((x) => x.text).join(" "),
+              kind = classify(text),
+              title = titleFor(text, n, kind);
+            fingerprint += hash(text.replace(/\s+/g, " "));
+            const normalized = text.replace(/\s+/g, " "),
+              sheetDimensions = Array.from(
+                new Set(
+                  (normalized.match(/\b\d{3,5}(?=\s*(?:mm\b|x|×|$))/gi) || [])
+                    .map((v) => Number(v))
+                    .filter((v) => v >= 300 && v <= 30000),
+                ),
+              ).sort((a, b) => a - b),
+              openingRefs = Array.from(
+                new Set(
+                  (normalized.match(/\b[DW]\s*\d+[A-Z]?\b/gi) || []).map((v) =>
+                    v.toUpperCase().replace(/\s+/g, ""),
+                  ),
+                ),
+              ).sort(),
+              clauses = normalized
+                .split(/(?<=[.;:])\s+/)
+                .filter((s) =>
+                  /(brick|stone|render|cladding|wall|partition|floor|ceiling|skirting|tile|roof|insulation|drain|rainwater|heating|plumbing|electrical)/i.test(
+                    s,
+                  ),
+                )
+                .join("|");
+            sheets.push({
+              page: n,
+              kind,
+              title,
+              fingerprint: hash(normalized),
+              dimensions: sheetDimensions,
+              openingRefs,
+              clauseFingerprint: hash(clauses),
+            });
+            if (kind !== "OTHER") hits.push({ page: n, kind, title });
+            if (kind === "SCHEDULE")
+              openings.push(
+                ...parseOpeningSchedules(rowsFromPositionedText(items), n),
+              );
+            text
+              .split(/(?<=[.;:])\s+/)
+              .filter(
+                (s) =>
+                  /(brick|stone|render|cladding|wall|partition|floor|ceiling|skirting|tile|roof|insulation|drain|rainwater|heating|plumbing|electrical)/i.test(
+                    s,
+                  ) &&
+                  s.length > 14 &&
+                  s.length < 320,
+              )
+              .slice(0, 20)
+              .forEach((s) => scopes.push({ page: n, text: s.trim() }));
+          }
+          manifests.push({
+            name: source.name,
+            pages: pdf.numPages,
+            fingerprint: hash(fingerprint),
+            sheets,
+          });
+          if (d === docIndex) {
+            activePdf = pdf;
+            activeHits = hits;
+          }
+        }
+        if (cancelled) return;
+        pdfRef.current = activePdf;
+        setPages(activePdf.numPages);
+        setSheetHits(activeHits);
+        setSchedule(openings);
+        setScopeLines(scopes);
+        onManifest?.({ documents: manifests, openingRows: openings });
+        setPage(activeHits.find((h) => h.kind === "PLAN")?.page || 1);
+      } catch (e: any) {
+        setError(e?.message || "Could not index document pack");
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [docs, docIndex, currentDoc]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const pdf = pdfRef.current;
+      if (!pdf) return;
+      setBusy(true);
+      try {
+        const pdfjs = await import("pdfjs-dist"),
+          pg = await pdf.getPage(page),
+          tc = await pg.getTextContent(),
+          base = pg.getViewport({ scale: 1 }),
+          text = (tc.items as any[]).map((x) => String(x.str || "")).join(" ");
+        setPageKind(classify(text));
+        setPageSize({ w: base.width, h: base.height });
+        const op = await pg.getOperatorList();
+        const lines = extractPdfLineSegments(
+          op.fnArray,
+          op.argsArray,
+          pdfjs.OPS,
+          (x, y) => base.convertToViewportPoint(x, y),
+        )
+          .map((s) => ({
+            x1: (s.a.x / base.width) * 100,
+            y1: (s.a.y / base.height) * 100,
+            x2: (s.b.x / base.width) * 100,
+            y2: (s.b.y / base.height) * 100,
+          }))
+          .filter((s) => Math.hypot(s.x2 - s.x1, s.y2 - s.y1) > 0.2);
+        if (cancelled) return;
+        setVectors(lines);
+        const positioned = (pattern: RegExp) =>
+          (tc.items as any[])
+            .filter((x) => x.str && pattern.test(String(x.str).trim()))
+            .map((x) => {
+              const p = base.convertToViewportPoint(
+                x.transform[4],
+                x.transform[5],
+              );
+              return {
+                text: String(x.str).trim(),
+                x: (p[0] / base.width) * 100,
+                y: (p[1] / base.height) * 100,
+              };
+            });
+        setLabels(positioned(ROOM));
+        setDoorRefs(positioned(DOOR));
+        setWindowRefs(positioned(WINDOW));
+        const dims = positioned(DIM)
+          .map((x) => ({ ...x, mm: Number(x.text.replace(/\D/g, "")) }))
+          .filter((x) => x.mm >= 300 && x.mm <= 30000);
+        setDimensions(dims);
+        const count = new Map<number, number>();
+        dims
+          .map((d) => d.mm)
+          .filter((v) => v >= 2400 && v <= 3600)
+          .forEach((v) => count.set(v, (count.get(v) || 0) + 1));
+        setHeightMm(
+          [...count]
+            .filter(([, n]) => n >= 2)
+            .sort((a, b) => b[1] - a[1])[0]?.[0] || null,
+        );
+        const host = canvas.current?.parentElement,
+          renderScale = Math.max(
+            0.5,
+            Math.min(2, (host?.clientWidth || 900) / base.width),
+          ),
+          vp = pg.getViewport({ scale: renderScale }),
+          el = canvas.current;
+        if (!el) return;
+        const dpr = window.devicePixelRatio || 1;
+        el.width = Math.floor(vp.width * dpr);
+        el.height = Math.floor(vp.height * dpr);
+        el.style.width = vp.width + "px";
+        el.style.height = vp.height + "px";
+        const ctx = el.getContext("2d");
+        if (ctx)
+          await pg.render({
+            canvas: el,
+            canvasContext: ctx,
+            viewport: vp,
+            transform: dpr === 1 ? undefined : [dpr, 0, 0, dpr, 0, 0],
+          }).promise;
+        const raw: { row: Dimension; scale: number; length: number }[] = [];
+        for (const d of dims) {
+          lines
+            .map((s) => {
+              const mid = { x: (s.x1 + s.x2) / 2, y: (s.y1 + s.y2) / 2 },
+                length = Math.hypot(
+                  ((s.x2 - s.x1) / 100) * base.width,
+                  ((s.y2 - s.y1) / 100) * base.height,
+                );
+              return { length, distance: Math.hypot(mid.x - d.x, mid.y - d.y) };
+            })
+            .filter((x) => x.distance < 10 && x.length > 8)
+            .sort((a, b) => a.distance - b.distance)
+            .slice(0, 8)
+            .forEach((x) => {
+              const scale = d.mm / x.length;
+              if (scale > 0.1 && scale < 100)
+                raw.push({ row: d, scale, length: x.length });
+            });
+        }
+        if (raw.length) {
+          const sorted = raw.map((x) => x.scale).sort((a, b) => a - b),
+            rough = sorted[Math.floor(sorted.length / 2)],
+            unique = dims
+              .map((d, i) => {
+                const best = raw
+                  .filter((x) => x.row === d)
+                  .sort(
+                    (a, b) =>
+                      Math.abs(a.scale - rough) - Math.abs(b.scale - rough),
+                  )[0];
+                return best
+                  ? {
+                      id: `P${page}-D${i + 1}-${d.mm}`,
+                      figuredMm: d.mm,
+                      drawnLength: best.length,
+                      page,
+                      drawing: currentDoc.name,
+                    }
+                  : null;
+              })
+              .filter(Boolean) as CalibrationEvidence[],
+            result = validateCalibration(unique, 1.5);
+          setAutoCalibration(result);
+          setAutoScale(result.valid ? result.mmPerUnit : null);
+        } else {
+          setAutoCalibration(null);
+          setAutoScale(null);
+        }
+      } catch (e: any) {
+        setError(e?.message || "Could not render drawing");
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [page, currentDoc?.url]);
+
+  const currentScale = activeScale || 0,
+    quantity =
+      pageSize && currentScale && trace.length >= 3
+        ? metricArea(trace, pageSize, currentScale)
+        : 0,
+    tracePerimeter =
+      pageSize && currentScale && trace.length >= 3
+        ? metricPerimeter(trace, pageSize, currentScale)
+        : 0,
+    traceLength =
+      pageSize && currentScale && trace.length >= 2
+        ? metricPolyline(trace, pageSize, currentScale)
+        : 0;
+  const scopeFor = (rx: RegExp) =>
+    scopeLines.filter((s) => rx.test(s.text)).slice(0, 3);
+  const addMarkup = (
+    kind: Markup["kind"],
+    points: { x: number; y: number }[],
+    label: string,
+    q: number,
+    unit: Markup["unit"] = "m²",
+  ) => {
+    const prefix =
+        kind === "room"
+          ? "A"
+          : kind === "facade"
+            ? "F"
+            : kind === "opening"
+              ? "O"
+              : kind === "gifa"
+                ? "G"
+                : "M",
+      ref = `P${String(page).padStart(2, "0")}-${prefix}${String(markups.filter((m) => m.page === page && m.kind === kind).length + 1).padStart(2, "0")}`;
+    setMarkups((v) => [
+      ...v,
+      { ref, page, kind, points, label, quantity: q, unit },
+    ]);
+    return ref;
+  };
+  const evidenceBase = (ref: string) =>
+    `${ref} · ${currentDoc.name} · P${page} · ${manualCalibration.valid ? "two-point reviewed calibration" : `${autoCalibration?.accepted.length || 0} independently agreeing figured dimensions`} · ${currentScale.toFixed(3)} mm/PDF pt`;
+  const runTopology = (room: Label) => {
+    setSelectedRoom(room);
+    setTrace([]);
+    if (!pageSize || !currentScale) {
+      setTopologyNote(
+        "Calibration must be validated before topology can produce a metric quantity.",
+      );
+      return;
+    }
+    const axis = vectors
+      .map(
+        (v) =>
+          ({ a: { x: v.x1, y: v.y1 }, b: { x: v.x2, y: v.y2 } }) as Segment,
+      )
+      .filter((s) => {
+        const dx = Math.abs(s.b.x - s.a.x),
+          dy = Math.abs(s.b.y - s.a.y),
+          len = Math.hypot(dx, dy),
+          inside =
+            Math.max(s.a.x, s.b.x) > room.x - 18 &&
+            Math.min(s.a.x, s.b.x) < room.x + 18 &&
+            Math.max(s.a.y, s.b.y) > room.y - 18 &&
+            Math.min(s.a.y, s.b.y) < room.y + 18;
+        return inside && len > 0.6 && len < 30 && (dx < 0.12 || dy < 0.12);
+      });
+    const faces = buildClosedTopology(
+        bridgeCollinearGaps(axis, { axisTolerance: 0.08, maxGap: 5 }),
+        { snapTolerance: 0.08, minArea: 0.04, maxArea: 700 },
+      ),
+      polygon = selectRoomPolygon(faces, room, { minArea: 0.2, maxArea: 500 });
+    if (!polygon) {
+      setTopologyNote(
+        "No defensible closed face found. Trace the room boundary; HX will not substitute a rectangle.",
+      );
+      setTool("room");
+      return;
+    }
+    const area = metricArea(polygon.points, pageSize, currentScale);
+    if (area < 1 || area > 100) {
+      setTopologyNote(
+        "Topology candidate failed the 1–100 m² room sanity gate and remains unmeasured.",
+      );
+      setTool("room");
+      return;
+    }
+    setTrace(polygon.points);
+    setTopologyNote(
+      `${polygon.points.length}-vertex closed face found. Review the highlighted topology before adding quantities.`,
+    );
+    setTool("room");
+  };
+  const roomMatch = (scheduleRoom: string, room: string) =>
+    scheduleRoom
+      .toLowerCase()
+      .replace(/bed\s+(\d+)/, "bedroom $1")
+      .replace("master bed", "master bedroom")
+      .includes(room.toLowerCase());
+  const buildRoom = () => {
+    if (
+      !selectedRoom ||
+      !pageSize ||
+      !currentScale ||
+      trace.length < 3 ||
+      quantity <= 0
+    )
+      return;
+    const ref = addMarkup("room", trace, selectedRoom.text, quantity),
+      roomRows = schedule.filter((r) => roomMatch(r.room, selectedRoom.text)),
+      doors = roomRows.filter((r) => r.kind === "door"),
+      windows = roomRows.filter((r) => r.kind === "window"),
+      openings = [
+        ...doors.map((d) => ({ width: d.widthMm / 1000, height: 2.1 })),
+        ...windows
+          .filter((w) => w.heightMm)
+          .map((w) => ({
+            width: w.widthMm / 1000,
+            height: w.heightMm! / 1000,
+          })),
+      ],
+      base = evidenceBase(ref),
+      scope = scopeFor(/floor|tile|timber|vinyl|carpet/i),
+      rows: BoqDraft[] = [
+        {
+          id: `${ref}-FLOOR`,
+          page,
+          room: selectedRoom.text,
+          item: "Floor area / finish",
+          unit: "m²",
+          qty: Number(quantity.toFixed(2)),
+          scope: scope.length
+            ? scope.map((s) => s.text).join(" | ")
+            : "Measured floor area; finish specification not explicitly resolved.",
+          sourcePages: scope.map((s) => s.page),
+          evidence: `${base} · closed ${trace.length}-vertex topology`,
+          markupRef: ref,
+          status: "REVIEW",
+        },
+        {
+          id: `${ref}-CEILING`,
+          page,
+          room: selectedRoom.text,
+          item: "Ceiling area / finish",
+          unit: "m²",
+          qty: Number(quantity.toFixed(2)),
+          scope:
+            "Ceiling plan footprint matched to reviewed room topology; finish requires specification review.",
+          evidence: `${base} · same horizontal room topology`,
+          markupRef: ref,
+          status: "REVIEW",
+        },
+        {
+          id: `${ref}-SKIRT`,
+          page,
+          room: selectedRoom.text,
+          item: "Skirting net of scheduled door openings",
+          unit: "m",
+          qty: Number(
+            netPerimeter(
+              tracePerimeter,
+              doors.map((d) => d.widthMm / 1000),
+            ).toFixed(2),
+          ),
+          scope: `Gross perimeter ${tracePerimeter.toFixed(2)} m less scheduled openings: ${doors.map((d) => `${d.tag} ${d.widthMm}mm`).join(", ") || "none resolved"}.`,
+          sourcePages: [...new Set(doors.map((d) => d.page))],
+          evidence: `${base} · schedule deductions`,
+          markupRef: ref,
+          status: "REVIEW",
+        },
+      ];
+    if (heightMm)
+      rows.push({
+        id: `${ref}-WALL`,
+        page,
+        room: selectedRoom.text,
+        item: "Internal wall finish / decoration net of openings",
+        unit: "m²",
+        qty: Number(
+          netWallArea(tracePerimeter, heightMm / 1000, openings).toFixed(2),
+        ),
+        scope: `Perimeter × independently repeated ${heightMm}mm height less ${doors.length} door and ${windows.length} window schedule opening(s).`,
+        sourcePages: [...new Set(roomRows.map((r) => r.page))],
+        evidence: `${base} · repeated figured height ${heightMm}mm · schedule deductions`,
+        markupRef: ref,
+        status: "REVIEW",
+      });
+    else
+      rows.push({
+        id: `${ref}-WALL`,
+        page,
+        room: selectedRoom.text,
+        item: "Internal wall finish / decoration",
+        unit: "m²",
+        qty: 0,
+        scope:
+          "Unmeasured: no independently repeated storey-height dimension resolved.",
+        evidence: `${base} · height evidence unresolved`,
+        markupRef: ref,
+        status: "UNMEASURED",
+      });
+    rows.forEach((r) => onBoq?.(r));
+    setTool("inspect");
+    setTrace([]);
+  };
+  const finishFacade = () => {
+    if (!pageSize || !currentScale || trace.length < 3) return;
+    if (tool === "facade") {
+      setFacadeGross(quantity);
+      const ref = addMarkup("facade", trace, "Gross façade", quantity);
+      setTopologyNote(
+        `${ref} gross façade recorded. Trace each opening before adding the net façade.`,
+      );
+    } else {
+      setOpeningAreas((v) => [...v, quantity]);
+      addMarkup(
+        "opening",
+        trace,
+        `Opening ${openingAreas.length + 1}`,
+        quantity,
+      );
+    }
+    setTrace([]);
+  };
+  const addFacadeBoq = () => {
+    if (!facadeGross) return;
+    const net = netFacadeArea(
+        facadeGross,
+        openingAreas.map((a) => ({ width: a, height: 1 })),
+      ),
+      facade = markups
+        .filter((m) => m.page === page && m.kind === "facade")
+        .at(-1),
+      openings = markups.filter((m) => m.page === page && m.kind === "opening"),
+      scope = scopeFor(/brick|stone|render|cladding|external wall/i),
+      ref = facade?.ref || `P${String(page).padStart(2, "0")}-F01`;
+    [
+      {
+        id: `${ref}-GROSS`,
+        item: "External façade gross area",
+        qty: facadeGross,
+        scope: "Gross marked elevation area.",
+      },
+      {
+        id: `${ref}-NET`,
+        item: "External façade net area",
+        qty: net,
+        scope: `Gross façade less ${openings.length} marked opening polygon(s).`,
+      },
+    ].forEach((r) =>
+      onBoq?.({
+        ...r,
+        page,
+        room: "Elevation",
+        unit: "m²",
+        sourcePages: scope.map((s) => s.page),
+        evidence: `${evidenceBase(ref)} · deductions ${openings.map((x) => x.ref).join(", ") || "none"}`,
+        markupRef: ref,
+        status: "REVIEW",
+      }),
+    );
+  };
+  const finishGifa = () => {
+    if (!pageSize || !currentScale || trace.length < 3) return;
+    const floor =
+        sheetHits.find((h) => h.page === page)?.title || `Floor P${page}`,
+      ref = addMarkup("gifa", trace, `${floor} external face`, quantity);
+    onGifa?.(floor, Number(quantity.toFixed(2)), evidenceBase(ref));
+    onBoq?.({
+      id: `${ref}-GIFA`,
+      page,
+      room: floor,
+      item: "GIFA external-face floor polygon",
+      unit: "m²",
+      qty: Number(quantity.toFixed(2)),
+      scope:
+        "External-face polygon measured separately from room finishes for NRM1 analysis.",
+      evidence: evidenceBase(ref),
+      markupRef: ref,
+      status: "REVIEW",
+    });
+    setTrace([]);
+    setTool("inspect");
+  };
+  const finishWork = () => {
+    if (!pageSize || !currentScale) return;
+    const item = WORK_ITEMS.find((x) => x.label === workItem)!;
+    const valid =
+      item.unit === "nr"
+        ? trace.length > 0
+        : item.unit === "m"
+          ? trace.length > 1
+          : trace.length > 2;
+    if (!valid) return;
+    const measured =
+        item.unit === "nr"
+          ? trace.length
+          : item.unit === "m"
+            ? metricPolyline(trace, pageSize, currentScale)
+            : metricArea(trace, pageSize, currentScale),
+      ref = addMarkup("work", trace, item.label, measured, item.unit),
+      scope = scopeFor(item.rx);
+    onBoq?.({
+      id: `${ref}-${item.label.replace(/\W+/g, "-").toUpperCase()}`,
+      page,
+      room: sheetHits.find((h) => h.page === page)?.title || `Drawing P${page}`,
+      item: item.label,
+      unit: item.unit,
+      qty: Number(measured.toFixed(2)),
+      scope: scope.length
+        ? scope.map((s) => s.text).join(" | ")
+        : "Measured geometry retained; construction build-up/specification remains unresolved.",
+      sourcePages: scope.map((s) => s.page),
+      evidence: `${evidenceBase(ref)} · ${item.unit === "nr" ? `${trace.length} marked points` : `${trace.length}-vertex ${item.unit === "m" ? "polyline" : "polygon"}`}`,
+      markupRef: ref,
+      status: "REVIEW",
+    });
+    setTrace([]);
+    setTool("inspect");
+  };
+  const clickDrawing = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (tool === "inspect") return;
+    const r = e.currentTarget.getBoundingClientRect(),
+      p = {
+        x: ((e.clientX - r.left) / r.width) * 100,
+        y: ((e.clientY - r.top) / r.height) * 100,
+      };
+    if (tool === "calibrate" && selectedDim) {
+      const next = [...calPts, p];
+      setCalPts(next);
+      if (next.length === 2 && pageSize) {
+        const a = px(next[0], pageSize),
+          b = px(next[1], pageSize);
+        setManualEvidence((v) => [
+          ...v.filter((x) => x.id !== `P${page}-${selectedDim}`),
+          {
+            id: `P${page}-${selectedDim}`,
+            figuredMm: selectedDim,
+            drawnLength: Math.hypot(b.x - a.x, b.y - a.y),
+            page,
+            drawing: currentDoc.name,
+          },
+        ]);
+        setCalPts([]);
+        setSelectedDim(null);
+      }
+      return;
+    }
+    setTrace((v) => [...v, p]);
+  };
+  const shown = markups.filter((m) => m.page === page);
+  return (
+    <div className="pdf-workspace">
+      <div className="pdf-toolbar">
+        <select
+          value={docIndex}
+          onChange={(e) => {
+            setDocIndex(Number(e.target.value));
+            setPage(1);
+          }}
+        >
+          {docs.map((d, i) => (
+            <option key={d.name + i} value={i}>
+              {d.name}
+            </option>
+          ))}
+        </select>
+        <button disabled={page <= 1} onClick={() => setPage((v) => v - 1)}>
+          ‹
+        </button>
+        <span>
+          P{page} / {pages} · {pageKind}
+        </span>
+        <button disabled={page >= pages} onClick={() => setPage((v) => v + 1)}>
+          ›
+        </button>
+        <select value={page} onChange={(e) => setPage(Number(e.target.value))}>
+          {sheetHits.map((h) => (
+            <option key={h.page} value={h.page}>
+              P{h.page} · {h.title}
+            </option>
+          ))}
+        </select>
+        {(["inspect", "room", "facade", "opening", "gifa"] as Tool[]).map(
+          (t) => (
+            <button
+              key={t}
+              onClick={() => {
+                setTool(t);
+                setTrace([]);
+              }}
+              className={tool === t ? "active" : ""}
+            >
+              {t === "inspect" ? "REVIEW" : `TRACE ${t.toUpperCase()}`}
+            </button>
+          ),
+        )}
+        <select value={workItem} onChange={(e) => setWorkItem(e.target.value)}>
+          {WORK_ITEMS.map((item) => (
+            <option key={item.label} value={item.label}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+        {(["area", "length", "count"] as Tool[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => {
+              setTool(t);
+              setTrace([]);
+            }}
+            className={tool === t ? "active" : ""}
+          >
+            {t.toUpperCase()}
+          </button>
+        ))}
+        <button onClick={() => setTrace([])}>CLEAR</button>
+      </div>
+      <div className="evidence-strip">
+        <strong>{activeScale ? "SCALE VALID" : "SCALE BLOCKED"}</strong>
+        <span>
+          {autoCalibration?.valid
+            ? `${autoCalibration.accepted.length} independent figured dimensions · ${autoCalibration.spreadPct.toFixed(2)}% spread`
+            : autoCalibration?.reason || "No independent calibration evidence"}
+        </span>
+        {activeScale && <span>{activeScale.toFixed(3)} mm/PDF pt</span>}
+        <select
+          value={selectedDim || ""}
+          onChange={(e) => {
+            setSelectedDim(Number(e.target.value) || null);
+            setTool("calibrate");
+            setCalPts([]);
+          }}
+        >
+          <option value="">Manual check · choose dimension</option>
+          {dimensions.slice(0, 50).map((d, i) => (
+            <option key={i} value={d.mm}>
+              {d.mm}mm · P{page}
+            </option>
+          ))}
+        </select>
+        <span>{manualEvidence.length} manual evidence line(s)</span>
+        {busy && <span>Reading drawing…</span>}
+      </div>
+      {topologyNote && <div className="topology-note">{topologyNote}</div>}
+      <div
+        className="drawing-stage"
+        onClick={clickDrawing}
+        onTouchStart={(e) => {
+          touchStart.current = e.touches[0]?.clientX ?? null;
+        }}
+        onTouchEnd={(e) => {
+          if (touchStart.current === null) return;
+          const dx = e.changedTouches[0].clientX - touchStart.current;
+          touchStart.current = null;
+          if (Math.abs(dx) < 60 || tool !== "inspect") return;
+          if (dx < 0 && page < pages) setPage((v) => v + 1);
+          if (dx > 0 && page > 1) setPage((v) => v - 1);
+        }}
+      >
+        <canvas ref={canvas} />
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          {shown.map((m) => (
+            <g key={m.ref}>
+              {m.unit === "m" ? (
+                <polyline
+                  points={m.points.map((p) => `${p.x},${p.y}`).join(" ")}
+                  className={`markup ${m.kind} ${focusMarkup === m.ref ? "focused" : ""}`}
+                  fill="none"
+                />
+              ) : m.unit === "nr" ? (
+                m.points.map((p, i) => (
+                  <circle
+                    key={i}
+                    cx={p.x}
+                    cy={p.y}
+                    r=".65"
+                    className={`markup ${m.kind} ${focusMarkup === m.ref ? "focused" : ""}`}
+                  />
+                ))
+              ) : (
+                <polygon
+                  points={m.points.map((p) => `${p.x},${p.y}`).join(" ")}
+                  className={`markup ${m.kind} ${focusMarkup === m.ref ? "focused" : ""}`}
+                />
+              )}
+              <text
+                x={m.points[0]?.x || 0}
+                y={Math.max(1, (m.points[0]?.y || 0) - 0.8)}
+              >
+                {m.ref} · {m.quantity.toFixed(2)} {m.unit}
+              </text>
+            </g>
+          ))}
+          {trace.length > 1 && (
+            <polygon
+              points={trace.map((p) => `${p.x},${p.y}`).join(" ")}
+              className="trace"
+            />
+          )}
+          {trace.map((p, i) => (
+            <circle key={i} cx={p.x} cy={p.y} r=".55" className="trace-point" />
+          ))}
+          {calPts.length === 2 && (
+            <line
+              x1={calPts[0].x}
+              y1={calPts[0].y}
+              x2={calPts[1].x}
+              y2={calPts[1].y}
+              className="cal-line"
+            />
+          )}
+        </svg>
+        {labels.map((l, i) => (
+          <button
+            key={i}
+            className={`room-label ${selectedRoom?.text === l.text ? "selected" : ""}`}
+            style={{ left: l.x + "%", top: l.y + "%" }}
+            onClick={(e) => {
+              e.stopPropagation();
+              runTopology(l);
+            }}
+          >
+            {l.text}
+          </button>
+        ))}
+        {doorRefs.map((d, i) => {
+          const row = reconcileOpening(d.text, schedule);
+          return (
+            <span
+              key={"d" + i}
+              className="drawing-tag door"
+              style={{ left: d.x + "%", top: d.y + "%" }}
+              title={
+                row
+                  ? `${row.tag} · ${row.widthMm}mm · schedule P${row.page}`
+                  : `${d.text} · schedule unresolved`
+              }
+            >
+              {d.text}
+            </span>
+          );
+        })}
+        {windowRefs.map((d, i) => {
+          const row = reconcileOpening(d.text, schedule);
+          return (
+            <span
+              key={"w" + i}
+              className="drawing-tag window"
+              style={{ left: d.x + "%", top: d.y + "%" }}
+              title={
+                row
+                  ? `${row.tag} · ${row.widthMm}×${row.heightMm}mm · schedule P${row.page}`
+                  : `${d.text} · schedule unresolved`
+              }
+            >
+              {d.text}
+            </span>
+          );
+        })}
+      </div>
+      <div className="measurement-actions">
+        <span>
+          {trace.length} vertices
+          {tool === "count"
+            ? ` · ${trace.length} nr`
+            : tool === "length" && traceLength > 0
+              ? ` · ${traceLength.toFixed(2)} m`
+              : quantity > 0
+                ? ` · ${quantity.toFixed(2)} m² · ${tracePerimeter.toFixed(2)} m perimeter`
+                : ""}
+        </span>
+        {tool === "room" && selectedRoom && quantity > 0 && (
+          <button onClick={buildRoom}>BUILD EVIDENCE-LINKED ROOM BOQ</button>
+        )}
+        {(tool === "facade" || tool === "opening") && quantity > 0 && (
+          <button onClick={finishFacade}>
+            {tool === "facade" ? "SAVE GROSS FACADE" : "SAVE OPENING DEDUCTION"}
+          </button>
+        )}
+        {facadeGross && (
+          <button onClick={addFacadeBoq}>ADD GROSS + NET FACADE TO BOQ</button>
+        )}
+        {tool === "gifa" && quantity > 0 && (
+          <button onClick={finishGifa}>SAVE EXTERNAL-FACE GIFA</button>
+        )}
+        {(["area", "length", "count"] as Tool[]).includes(tool) &&
+          ((tool === "count" && trace.length > 0) ||
+            (tool === "length" && trace.length > 1) ||
+            (tool === "area" && quantity > 0)) && (
+            <button onClick={finishWork}>ADD MEASURED WORK TO BOQ</button>
+          )}
+        <span>
+          {schedule.length} schedule openings indexed · {scopeLines.length}{" "}
+          construction-information clauses indexed
+        </span>
+      </div>
+      {error && <div className="pdf-error">{error}</div>}
+    </div>
+  );
+}

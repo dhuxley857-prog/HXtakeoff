@@ -1,46 +1,755 @@
 "use client";
-import{useMemo,useRef,useState}from"react";import PdfCanvas,{type BoqDraft} from "./components/PdfCanvas";import{Upload,FileText,Ruler,ScanLine,CheckCircle2,Plus}from"lucide-react";
-const items:any[]=[];
-const seedBoq:BoqDraft[]=[
-["PRELIMS","Project wide","Preliminaries / general requirements","item"],
-["SUBSTRUCTURE","Project wide","Foundations / substructure","m³"],
-["GROUNDWORKS","External / substructure","Excavation and earthworks","m³"],
-["DPC","Ground floor","DPC / membranes / radon / waterproofing","m²"],
-["GFLOOR","Ground floor","Ground floor construction","m²"],
-["EXTWALL","All elevations","External wall construction","m²"],
-["BRICK","All elevations","Facing brickwork / masonry finishes","m²"],
-["INTWALL","All floors","Internal partitions / wall construction","m²"],
-["LINING","All floors","Wall linings / plasterboard / ply lining","m²"],
-["ROOF","Roof","Roof structure and coverings","m²"],
-["INSUL","Project wide","Thermal / acoustic insulation","m²"],
-["WINDOW","All elevations","Windows","nr"],
-["EXTDOOR","All elevations","External doors","nr"],
-["INTDOOR","All floors","Internal doors / frames / ironmongery","nr"],
-["STAIR","Internal","Staircase / balustrades / handrails","item"],
-["FLOORFIN","All rooms","Floor finishes","m²"],
-["WALLFIN","All rooms","Wall finishes / decorations","m²"],
-["CEILING","All rooms","Ceilings / soffits / decorations","m²"],
-["SKIRT","All rooms","Skirtings / trims","m"],
-["JOINERY","Internal","Joinery / fitted items","item"],
-["KITCHEN","Kitchen","Kitchen fittings / worktops","item"],
-["SANITARY","Bathrooms / WC","Sanitaryware / bathroom fittings","nr"],
-["TILING","Bathrooms / kitchen","Wall and floor tiling","m²"],
-["PLUMB","Project wide","Plumbing / above-ground drainage","item"],
-["HEATING","Project wide","Heating installation","item"],
-["VENT","Project wide","Ventilation / extract","item"],
-["ELECT","Project wide","Electrical installation","item"],
-["LIGHT","Project wide","Lighting / accessories","nr"],
-["FIRE","Project wide","Fire stopping / fire protection","item"],
-["DRAIN","External","Below-ground drainage","m"],
-["EXTWORK","External","External works / paving / landscaping","m²"],
-["RAIN","External / roof","Rainwater goods","m"],
-["DECOR","Project wide","Decorations","m²"],
-["CLEAN","Project wide","Testing / commissioning / cleaning","item"]
-].map(([id,room,item,unit])=>({id:"T001-"+id,page:0,room,item,unit:unit as BoqDraft["unit"],qty:0,scope:"Test 001 package — scope and measured quantity to be coordinated from drawings, details, schedules and construction information.",evidence:"TEST 001 · full-package take-off register · measurement/evidence pending review",status:"REVIEW" as const}));
-export default function Home(){const[boq,setBoq]=useState<BoqDraft[]>(seedBoq);const[view,setView]=useState<"drawing"|"boq"|"costplan">("drawing");const[packFiles,setPackFiles]=useState<string[]>(["DH415BB-3 Construction Drawing Pack"]);const[compareOnly,setCompareOnly]=useState(false);const[boqSearch,setBoqSearch]=useState("");const[gifa,setGifa]=useState<number>(0);const measuredFloorArea=boq.filter(r=>r.qty>0&&/floor area|floor finish/i.test(r.item)).reduce((a,r)=>a+r.qty,0);const measuredFacadeArea=boq.filter(r=>r.qty>0&&/façade|facade|external wall/i.test(r.item)).reduce((a,r)=>a+r.qty,0);const measuredFloorPages=Array.from(new Set(boq.filter(r=>r.qty>0&&/floor area|floor finish/i.test(r.item)).map(r=>r.page).filter(Boolean)));const markupRef=(r:BoqDraft)=>{const m=(r.evidence||"").match(/\b(?:P\d{2}-[AL]\d{2}|E\d{2}-F\d{2})\b/);return m?.[0]||""};const[approved,setApproved]=useState<Record<string,boolean>>({});const[focusMarkup,setFocusMarkup]=useState<string>("");const[gifaByFloor,setGifaByFloor]=useState<Record<string,number>>({});const gifaMeasured=Object.values(gifaByFloor).reduce((a,v)=>a+(v||0),0);const[revision,setRevision]=useState(1);const[lockedRev,setLockedRev]=useState<number|null>(null);const[baseline,setBaseline]=useState<Record<string,{qty:number;scope:string;evidence:string}>>({});const[changed,setChanged]=useState<Record<string,boolean>>({});const[rates,setRates]=useState<Record<string,number>>({});const mergeBoq=(row:BoqDraft)=>{const b=baseline[row.id];if(lockedRev&&(!b||Math.abs((b.qty||0)-row.qty)>.005||b.scope!==row.scope||b.evidence!==row.evidence))setChanged(x=>({...x,[row.id]:true}));setBoq(v=>[...v.filter(x=>x.id!==row.id&&!(x.qty===0&&x.item.toLowerCase().includes(row.item.split(" / ")[0].toLowerCase()))),row].sort((a,b)=>(a.page-b.page)||a.room.localeCompare(b.room)||a.item.localeCompare(b.item)))};const exportBoq=()=>{const esc=(v:any)=>`"${String(v??"").replace(/"/g,`""`)}"`;const rows=[["Ref","Markup","Location","Description","Scope","Qty","Unit","Evidence","Status"],...boq.map((r,i)=>[String(i+1).padStart(3,"0"),markupRef(r),r.room,r.item,r.scope,r.qty||"",r.unit,r.evidence,approved[r.id]?"APPROVED":r.status])];const blob=new Blob([rows.map(x=>x.map(esc).join(",")).join("\n")],{type:"text/csv"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`HX-Takeoff-REV${revision}-BOQ.csv`;a.click();URL.revokeObjectURL(a.href)};const measured=boq.filter(r=>r.qty>0),pendingCount=boq.filter(r=>!r.qty).length,measuredCount=measured.length,totalMeasured=measured.reduce((a,r)=>a+r.qty,0);const measuredByUnit={area:measured.filter(r=>r.unit==="m²").reduce((a,r)=>a+r.qty,0),length:measured.filter(r=>r.unit==="m").reduce((a,r)=>a+r.qty,0),count:measured.filter(r=>r.unit==="nr").reduce((a,r)=>a+r.qty,0)};const[sel,setSel]=useState("W01");const[calibrated,setCalibrated]=useState(false);const[tool,setTool]=useState<"length"|"area"|"count"|"calibrate">("calibrate");const[mmPerPct,setMmPerPct]=useState(0);const[aiObjects,setAiObjects]=useState(false);const[pdfUrl,setPdfUrl]=useState<string|null>("/api/test001");const[pts,setPts]=useState<{x:number,y:number}[]>([]);const board=useRef<HTMLDivElement>(null);const addPoint=(e:React.MouseEvent)=>{if((!calibrated&&tool!=="calibrate")||!board.current)return;const r=board.current.getBoundingClientRect();const q={x:(e.clientX-r.left)/r.width*100,y:(e.clientY-r.top)/r.height*100};if(tool==="calibrate"){setPts(p=>{const n=[...p,q].slice(-2);if(n.length===2){const d=Math.hypot(n[1].x-n[0].x,n[1].y-n[0].y);const known=Number(prompt("Known distance between these points (mm)","9000"));if(known>0&&d>0){setMmPerPct(known/d);setCalibrated(true)}}return n})}else setPts(p=>[...p,q])};const reset=()=>setPts([]);const qty=useMemo(()=>{if(tool==="calibrate")return 0;if(tool==="count")return pts.length;if(pts.length<2)return 0;if(tool==="length"){let n=0;for(let i=1;i<pts.length;i++)n+=Math.hypot(pts[i].x-pts[i-1].x,pts[i].y-pts[i-1].y);return n*mmPerPct/1000}if(pts.length<3)return 0;let a=0;for(let i=0;i<pts.length;i++){const j=(i+1)%pts.length;a+=pts[i].x*pts[j].y-pts[j].x*pts[i].y}return Math.abs(a/2)*mmPerPct*mmPerPct/1e6},[pts,tool,mmPerPct]);
-return <main><header><b><i>HX</i> TAKEOFF</b><span>TEST 001 · DH415BB-3 · Construction Issue</span><em>DH</em></header><div style={{padding:"6px 20px",background:"#eef1f3",fontSize:12,display:"flex",gap:10,alignItems:"center"}}><b>REV {revision}</b>{lockedRev===revision?<span>🔒 LOCKED BASELINE</span>:<button onClick={()=>{setLockedRev(revision);setBaseline(Object.fromEntries(boq.map(r=>[r.id,{qty:r.qty,scope:r.scope,evidence:r.evidence}])));setChanged({})}}>LOCK REV {revision}</button>}<button onClick={()=>{if(lockedRev){setRevision(v=>v+1);setChanged({})}}}>＋ NEW REVISION PACK</button></div><nav>Projects　 <button onClick={()=>setView("drawing")} style={{fontWeight:view==="drawing"?800:400}}>Drawings</button>　 Documents　 Take-off　 <button onClick={()=>setView("boq")} style={{fontWeight:view==="boq"?800:400}}>BOQ</button>　 <button onClick={()=>setView("costplan")} style={{fontWeight:view==="costplan"?800:400}}>NRM1 Cost Plan</button></nav>
-{view==="costplan"?<section style={{margin:20,background:"white",border:"1px solid #d8dde1"}}><div style={{padding:"16px",background:"#17232e",color:"white"}}><b>NRM 1 COST PLAN · TEST 001</b><div style={{fontSize:12,opacity:.8}}>Elemental cost planning · quantities remain review-controlled</div></div><div style={{padding:16}}><label style={{fontWeight:800}}>GIFA (m²)　<input type="number" min="0" step="0.01" value={gifa||""} onChange={e=>setGifa(Number(e.target.value))} placeholder="Measured GIFA"/></label>{gifaMeasured>0&&<button onClick={()=>setGifa(Number(gifaMeasured.toFixed(2)))} style={{marginLeft:10}}>USE EXTERNAL-FACE GIFA {gifaMeasured.toFixed(2)} m²</button>}<div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>{["Ground floor","First floor","Second floor","Basement"].map(fl=><label key={fl} style={{fontSize:12}}>{fl} external-face area (m²) <input type="number" min="0" step="0.01" value={gifaByFloor[fl]||""} onChange={e=>setGifaByFloor(v=>({...v,[fl]:Number(e.target.value)}))} style={{width:90}}/></label>)}</div><p style={{fontSize:12}}>GIFA is controlled separately from room floor finishes. Only reviewed external-face floor areas are totalled here; room-area sums are not used as GIFA.</p><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr>{["NRM 1 element","Basis","Quantity","Rate","Cost","£/m² GIFA","Status"].map(h=><th key={h} style={{textAlign:"left",padding:10,borderBottom:"1px solid #ddd"}}>{h}</th>)}</tr></thead><tbody>{["Facilitating works","Substructure","Superstructure","Internal finishes","Fittings, furnishings and equipment","Services","Prefabricated buildings and building units","Work to existing buildings","External works","Main contractor preliminaries","Main contractor overheads and profit","Project/design team fees","Other development/project costs","Risk allowances","Inflation"].map(x=>{const words=x.toLowerCase();const mapped=boq.filter(r=>{const t=r.item.toLowerCase();if(words.includes("substructure"))return /(foundation|substructure|excavat|ground)/.test(t);if(words.includes("superstructure"))return /(wall|roof|window|door|stair|insul)/.test(t);if(words.includes("internal finishes"))return /(finish|ceiling|skirting|decor|lining|tiling)/.test(t);if(words==="services")return /(plumb|heating|vent|elect|light|fire)/.test(t);if(words.includes("external works"))return /(external works|drain|rainwater|paving|landscap)/.test(t);return false});const q=mapped.reduce((a,r)=>a+(r.qty||0),0),rate=rates[x]||0,cost=q*rate;return <tr key={x}><td style={{padding:10,borderBottom:"1px solid #eee"}}>{x}</td><td style={{padding:10,borderBottom:"1px solid #eee"}}>{mapped.length?mapped.length+" BOQ line(s)":"Elemental"}</td><td style={{padding:10,borderBottom:"1px solid #eee"}}>{q?q.toFixed(2):"TBC"}</td><td style={{padding:10,borderBottom:"1px solid #eee"}}><input type="number" value={rate||""} placeholder="£ rate" onChange={e=>setRates(v=>({...v,[x]:Number(e.target.value)}))} style={{width:80}}/></td><td style={{padding:10,borderBottom:"1px solid #eee"}}>{cost?"£"+cost.toLocaleString(undefined,{maximumFractionDigits:0}):"TBC"}</td><td style={{padding:10,borderBottom:"1px solid #eee"}}>{cost&&gifa?"£"+(cost/gifa).toFixed(2):"TBC"}</td><td style={{padding:10,borderBottom:"1px solid #eee"}}><mark>{q&&rate?"COSTED":"REVIEW"}</mark></td></tr>})}</tbody></table></div></section>:view==="boq"?<section style={{margin:20,background:"white",border:"1px solid #d8dde1"}}><div style={{padding:"16px",background:"#17232e",color:"white"}}><b>BOQ · REVIEW</b><div style={{fontSize:12,opacity:.8}}>TEST 001 · DH415BB-3 · measured items and extracted scope</div><div style={{marginTop:8,fontSize:12}}><strong>{measuredCount}</strong> measured lines · façade {measuredFacadeArea.toFixed(2)} m² · {measuredByUnit.area.toFixed(2)} m² · {measuredByUnit.length.toFixed(2)} m · {measuredByUnit.count.toFixed(0)} nr · {Object.values(approved).filter(Boolean).length} approved · {pendingCount} pending/unmeasured lines　 <button onClick={()=>setCompareOnly(v=>!v)}>{compareOnly?"SHOW ALL":"CHANGES ONLY"}</button> <button onClick={exportBoq}>EXPORT BOQ CSV</button> <input value={boqSearch} onChange={e=>setBoqSearch(e.target.value)} placeholder="Filter room / item / scope" style={{marginLeft:6,minWidth:180}}/></div></div><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr>{["Ref","Markup","Location","Description","Scope / line item detail","Qty","Unit","Evidence","Status"].map(h=><th key={h} style={{textAlign:"left",padding:10,borderBottom:"1px solid #ddd"}}>{h}</th>)}</tr></thead><tbody>{boq.length?boq.filter(r=>(!compareOnly||changed[r.id])&&(!boqSearch||`${r.room} ${r.item} ${r.scope}`.toLowerCase().includes(boqSearch.toLowerCase()))).map((r,i)=><tr key={r.id}><td style={{padding:10}}>{String(i+1).padStart(3,"0")}</td><td style={{padding:10,fontWeight:800}}>{markupRef(r)?<button onClick={()=>{setFocusMarkup(markupRef(r));setView("drawing")}} title="Open drawing markup">{markupRef(r)}</button>:"—"}</td><td style={{padding:10}}>{r.room}</td><td style={{padding:10,color:changed[r.id]?"#b42318":undefined,fontWeight:changed[r.id]?800:undefined}}>{r.item}{changed[r.id]?<small style={{display:"block"}}>REVISION CHANGE · review required{baseline[r.id]?` · REV ${lockedRev}: ${baseline[r.id].qty||"TBC"} → REV ${revision}: ${r.qty||"TBC"}`:" · NEW LINE"}</small>:null}</td><td style={{padding:10,minWidth:300}}>{r.scope}</td><td style={{padding:10,fontWeight:800}}>{r.qty>0?r.qty.toFixed(2):"TBC"}</td><td style={{padding:10}}>{r.unit}</td><td style={{padding:10,minWidth:220}}>{r.evidence}</td><td style={{padding:10}}><mark>{approved[r.id]?"APPROVED":r.status}</mark>{r.qty>0&&<button onClick={()=>setApproved(v=>({...v,[r.id]:!v[r.id]}))} style={{display:"block",marginTop:5}}>{approved[r.id]?"UNAPPROVE":"APPROVE"}</button>}</td></tr>):<tr><td colSpan={9} style={{padding:30,textAlign:"center"}}><b>No measured BOQ lines yet.</b><div style={{marginTop:8}}>Return to Drawings, select/calibrate a room and use BUILD ROOM BOQ. Generated lines will appear here for review.</div><button onClick={()=>setView("drawing")} style={{marginTop:14}}>RETURN TO DRAWINGS</button></td></tr>}</tbody></table></div></section>:<><section className="hero"><div><small>MEASUREMENT ENGINE · TEST 001</small><h1>Drawing intelligence workspace.</h1><p>The complete DH415BB-3 construction issue package is the benchmark for document reading, geometry, coordination and take-off.</p></div><button><Plus size={17}/> New take-off</button></section>
-<section className="steps">{[[Upload,"1. Drawing","DH415BB-3 · Construction Issue"],[Ruler,"2. Calibrate",calibrated?"Calibrated ✓":"Use figured dimension"],[ScanLine,"3. Measure","Deterministic geometry"],[CheckCircle2,"4. Validate","Human review"]].map(([I,a,b]:any,i)=><article key={i}><I/><b>{a}</b><span>{b}</span></article>)}</section>
-<section className="work"><aside><h5>DRAWINGS</h5><div className="doc on"><FileText/> DH415BB-3 Construction Drawing Pack</div><h5>DOCUMENTS</h5><div className="doc"><FileText/> Construction Notes / Schedules / Details</div><button className="upload" onClick={()=>{setPdfUrl("/api/test001");setAiObjects(false);setPts([])}}>↗ LOAD TEST 001</button><label className="upload" style={{display:"block",cursor:"pointer"}}>＋ Drop / upload information pack<input type="file" accept="application/pdf" multiple style={{display:"none"}} onChange={e=>{const files=Array.from(e.target.files||[]);if(files.length){setPackFiles(files.map(f=>f.name));const file=files[0];if(pdfUrl&&pdfUrl.startsWith("blob:"))URL.revokeObjectURL(pdfUrl);setPdfUrl(URL.createObjectURL(file));setAiObjects(false);setPts([])}}}/></label>{packFiles.length>0&&<p style={{fontSize:11,lineHeight:1.5}}>{packFiles.map((n,i)=><span key={i} style={{display:"block"}}>• {n}</span>)}</p>}<h5>AI DRAWING READ</h5><button className="upload" onClick={()=>setAiObjects(true)}>✦ Run take-off overlay</button>{aiObjects&&<p style={{fontSize:12,lineHeight:1.5}}>✓ Test 001 PDF loaded<br/>✓ Overlay review mode active<br/>✓ Measurement tools available<br/>⚠ Automated object extraction not yet connected</p>}<h5>CALIBRATION</h5><p style={{fontSize:12,lineHeight:1.5}}>Use figured dimensions from the construction drawings for calibration. Do not assume scale.</p><button className="upload" onClick={()=>{setTool("calibrate");setPts([]);setCalibrated(false)}}>{calibrated?`✓ Scale ${mmPerPct.toFixed(1)} mm/unit`:"Start 2-point calibration"}</button></aside>
-<div className="viewer"><div className="bar">TEST 001 · Native drawing workspace <span>Construction Issue · measurement overlay</span></div><div style={{padding:"8px",display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>{(["calibrate","length","area","count"] as const).map(t=><button key={t} onClick={()=>{setTool(t);reset()}} style={{opacity:tool===t?1:.55}}>{t.toUpperCase()}</button>)}<button onClick={reset}>CLEAR</button><span style={{marginLeft:"auto",fontWeight:700}}>{tool==="calibrate"?(calibrated?"SCALE VALID":"PICK 2 POINTS"):tool==="count"?pts.length+" nr":qty.toFixed(2)+(tool==="area"?" m²":" m")}</span></div><div ref={board} onClick={addPoint} style={{position:"relative",background:"#f8f8f5",height:"70vh",minHeight:560,overflow:"hidden",cursor:(calibrated||tool==="calibrate")?"crosshair":"default"}}>{pdfUrl?<PdfCanvas url={pdfUrl} onBoq={mergeBoq} focusMarkup={focusMarkup}/>:<><div style={{position:"absolute",inset:0,display:"grid",placeItems:"center",zIndex:3,background:"#f4f4f1"}}><div style={{maxWidth:430,textAlign:"center",padding:28}}><b style={{fontSize:18}}>TEST 001 · DH415BB-3</b><p style={{fontSize:13,lineHeight:1.5}}>Construction Issue source selected. Use LOAD TEST 001 to load the complete public PDF, or upload a local copy.</p></div></div><div style={{display:"none"}}><div style={{position:"absolute",left:"8%",top:"10%",right:"8%",bottom:"12%",border:"5px double #26333d"}}><div style={{position:"absolute",left:"0",top:"52%",width:"58%",borderTop:"5px solid #26333d"}}/><div style={{position:"absolute",left:"58%",top:"0",height:"100%",borderLeft:"5px solid #26333d"}}/><div style={{position:"absolute",left:"78%",top:"0",height:"42%",borderLeft:"4px solid #26333d"}}/><div style={{position:"absolute",left:"12%",top:"22%",fontSize:13}}>KITCHEN / DINING</div><div style={{position:"absolute",left:"14%",top:"72%",fontSize:13}}>LIVING</div><div style={{position:"absolute",left:"65%",top:"25%",fontSize:13}}>HALL</div><div style={{position:"absolute",left:"82%",top:"22%",fontSize:13}}>WC</div><div style={{position:"absolute",left:"68%",top:"70%",fontSize:13}}>STUDY</div></div><div style={{position:"absolute",left:"8%",bottom:"4%",fontSize:10}}>TEST 001 · STAGE 4 DRAWING WORKSPACE · VISUAL TEST SHEET</div></div></>}<svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none"}}>{pdfUrl&&aiObjects&&<g><rect x="12" y="15" width="43" height="35" fill="rgba(198,162,75,.12)" stroke="#c6a24b" strokeWidth=".5"/><rect x="12" y="51" width="43" height="31" fill="rgba(198,162,75,.12)" stroke="#c6a24b" strokeWidth=".5"/><line x1="55" y1="15" x2="55" y2="82" stroke="#c6a24b" strokeWidth=".7"/><text x="14" y="19" fontSize="2.2" fill="#8b6d24">AI AREA</text><text x="57" y="19" fontSize="2.2" fill="#8b6d24">AI WALL</text></g>}{pts.length>1&&<polyline points={pts.map(p=>p.x+","+p.y).join(" ")} fill={tool==="area"?"rgba(45,112,88,.15)":"none"} stroke="#2d7058" strokeWidth=".6"/>}{pts.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r=".7" fill="#2d7058"/>)}</svg></div><div style={{padding:8,fontSize:11,opacity:.65}}>Upload a PDF from your device to replace the visual test sheet. The markup layer remains in the same workspace so measurements can be drawn over the document.</div></div>
-<aside className="take"><h5>TAKE-OFF EVIDENCE　 <mark>{calibrated?"SCALE VALID":"REVIEW"}</mark></h5>{aiObjects&&<div className="item picked"><div><b>AI drawing interpretation</b><small>Geometry + tags + dimension evidence</small></div><strong>REVIEW</strong></div>}<div className="item picked"><div><b>Benchmark footprint</b><small>Blind test · no benchmark quantity exposed to intelligence</small></div><strong>REVIEW</strong></div>{items.map(x=><div key={x[0]} onClick={()=>setSel(x[0])} className={"item "+(sel===x[0]?"picked":"")}><div><b>{x[0]} · {x[1]}</b><small>Spec {x[3]} · Evidence {x[4]}</small></div><strong>{x[2]}</strong></div>)}<footer><button>Reject</button><button>Amend</button><button className="approve">Approve</button></footer></aside></section></>}{boq.length>0&&view==="drawing"&&<section style={{margin:"18px 28px 40px",background:"white",border:"1px solid #d8dde1"}}><div style={{padding:"14px 16px",background:"#17232e",color:"white",display:"flex",justifyContent:"space-between"}}><b>BOQ · REVIEW DRAFT</b><span>{boq.length} measured line{boq.length===1?"":"s"} · not approved</span></div><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr>{["Ref","Location","Description","Scope / line item detail","Qty","Unit","Evidence","Status"].map(h=><th key={h} style={{textAlign:"left",padding:10,borderBottom:"1px solid #ddd"}}>{h}</th>)}</tr></thead><tbody>{boq.map((r,i)=><tr key={r.id}><td style={{padding:10,borderBottom:"1px solid #eee"}}>{String(i+1).padStart(3,"0")}</td><td style={{padding:10,borderBottom:"1px solid #eee"}}>{r.room}</td><td style={{padding:10,borderBottom:"1px solid #eee"}}>{r.item}</td><td style={{padding:10,borderBottom:"1px solid #eee",minWidth:320}}>{r.scope}{r.sourcePages?.length?<small style={{display:"block",marginTop:5,opacity:.65}}>Source page{r.sourcePages.length===1?"":"s"}: {r.sourcePages.map(p=>"P"+p).join(", ")}</small>:null}</td><td style={{padding:10,borderBottom:"1px solid #eee",fontWeight:800}}>{r.qty.toFixed(2)}</td><td style={{padding:10,borderBottom:"1px solid #eee"}}>{r.unit}</td><td style={{padding:10,borderBottom:"1px solid #eee",minWidth:220}}>{r.evidence}</td><td style={{padding:10,borderBottom:"1px solid #eee"}}><mark>{r.status}</mark></td></tr>)}</tbody></table></div></section>}</main>}
+
+import { useMemo, useState } from "react";
+import { FileText, LockKeyhole, Upload } from "lucide-react";
+import PdfCanvas, {
+  type BoqDraft,
+  type PackManifest,
+  type SourceDocument,
+} from "./components/PdfCanvas";
+
+const register: [string, string, string, BoqDraft["unit"]][] = [
+  ["PRELIMS", "Project wide", "Preliminaries / general requirements", "item"],
+  ["SUBSTRUCTURE", "Project wide", "Foundations / substructure", "m³"],
+  ["GROUNDWORKS", "External / substructure", "Excavation and earthworks", "m³"],
+  ["DPC", "Ground floor", "DPC / membranes / waterproofing", "m²"],
+  ["GFLOOR", "Ground floor", "Ground-floor construction", "m²"],
+  ["EXTWALL", "Elevations", "External wall construction", "m²"],
+  ["BRICK", "Elevations", "Facing brickwork / masonry finishes", "m²"],
+  ["INTWALL", "All floors", "Internal partitions / wall construction", "m²"],
+  ["LINING", "All floors", "Wall linings / plasterboard", "m²"],
+  ["ROOF", "Roof", "Roof structure and coverings", "m²"],
+  ["INSUL", "Project wide", "Thermal / acoustic insulation", "m²"],
+  ["WINDOW", "Elevations", "Windows", "nr"],
+  ["EXTDOOR", "Elevations", "External doors", "nr"],
+  ["INTDOOR", "All floors", "Internal doors / frames / ironmongery", "nr"],
+  ["STAIR", "Internal", "Staircase / balustrades / handrails", "item"],
+  ["FLOORFIN", "All rooms", "Floor finishes", "m²"],
+  ["WALLFIN", "All rooms", "Wall finishes / decorations", "m²"],
+  ["CEILING", "All rooms", "Ceilings / soffits / decorations", "m²"],
+  ["SKIRT", "All rooms", "Skirtings / trims", "m"],
+  ["JOINERY", "Internal", "Joinery / fitted items", "item"],
+  ["KITCHEN", "Kitchen", "Kitchen fittings / worktops", "item"],
+  ["SANITARY", "Bathrooms / WC", "Sanitaryware / bathroom fittings", "nr"],
+  ["TILING", "Bathrooms / kitchen", "Wall and floor tiling", "m²"],
+  ["PLUMB", "Project wide", "Plumbing / above-ground drainage", "item"],
+  ["HEATING", "Project wide", "Heating installation", "item"],
+  ["VENT", "Project wide", "Ventilation / extract", "item"],
+  ["ELECT", "Project wide", "Electrical installation", "item"],
+  ["LIGHT", "Project wide", "Lighting / accessories", "nr"],
+  ["FIRE", "Project wide", "Fire stopping / protection", "item"],
+  ["DRAIN", "External", "Below-ground drainage", "m"],
+  ["EXTWORK", "External", "External works / paving / landscaping", "m²"],
+  ["RAIN", "External / roof", "Rainwater goods", "m"],
+  ["DECOR", "Project wide", "Decorations", "m²"],
+];
+const seed: BoqDraft[] = register.map(([id, room, item, unit]) => ({
+  id: `T001-${id}`,
+  page: 0,
+  room,
+  item,
+  unit,
+  qty: 0,
+  scope:
+    "Unmeasured until supported by coordinated drawing, schedule or specification evidence.",
+  evidence: "TEST 001 · evidence pending · no quantity assumed",
+  status: "UNMEASURED",
+}));
+type Baseline = {
+  boq: Record<string, { qty: number; scope: string; evidence: string }>;
+  manifest: PackManifest | null;
+  gifa: Record<string, number>;
+};
+const nrmElements = [
+  "Facilitating works",
+  "Substructure",
+  "Superstructure",
+  "Internal finishes",
+  "Fittings, furnishings and equipment",
+  "Services",
+  "External works",
+  "Main contractor preliminaries",
+  "Overheads and profit",
+  "Risk allowances",
+  "Inflation",
+];
+
+export default function Home() {
+  const [view, setView] = useState<"drawing" | "boq" | "nrm" | "revision">(
+      "drawing",
+    ),
+    [boq, setBoq] = useState<BoqDraft[]>(seed),
+    [sources, setSources] = useState<SourceDocument[]>([
+      {
+        name: "DH415BB-3 Construction Drawing Pack",
+        url: "/api/test001",
+        revision: "Construction Issue",
+      },
+    ]);
+  const [manifest, setManifest] = useState<PackManifest | null>(null),
+    [revision, setRevision] = useState(1),
+    [lockedRev, setLockedRev] = useState<number | null>(null),
+    [baseline, setBaseline] = useState<Baseline | null>(null),
+    [focusMarkup, setFocusMarkup] = useState(""),
+    [approved, setApproved] = useState<Record<string, boolean>>({}),
+    [search, setSearch] = useState(""),
+    [changesOnly, setChangesOnly] = useState(false),
+    [gifaByFloor, setGifaByFloor] = useState<Record<string, number>>({}),
+    [rates, setRates] = useState<Record<string, number>>({});
+  const mergeBoq = (row: BoqDraft) =>
+    setBoq((v) =>
+      [
+        ...v.filter(
+          (x) =>
+            x.id !== row.id &&
+            !(
+              x.qty === 0 &&
+              x.item
+                .toLowerCase()
+                .includes(row.item.split(" /")[0].toLowerCase())
+            ),
+        ),
+        row,
+      ].sort(
+        (a, b) =>
+          a.page - b.page ||
+          a.room.localeCompare(b.room) ||
+          a.item.localeCompare(b.item),
+      ),
+    );
+  const handleManifest = (next: PackManifest) => {
+    setManifest(next);
+    const windows = next.openingRows.filter((r) => r.kind === "window"),
+      doors = next.openingRows.filter((r) => r.kind === "door"),
+      scheduled = new Set(next.openingRows.map((r) => r.tag)),
+      planDoorTags = Array.from(
+        new Set(
+          next.documents.flatMap((d) =>
+            d.sheets
+              .filter((s) => s.kind === "PLAN")
+              .flatMap((s) =>
+                s.openingRefs.filter((tag) => tag.startsWith("D")),
+              ),
+          ),
+        ),
+      ),
+      externalCandidates = planDoorTags.filter((tag) => !scheduled.has(tag));
+    if (windows.length)
+      mergeBoq({
+        id: "PACK-WINDOW-SCHEDULE",
+        page: windows[0].page,
+        room: "All elevations",
+        item: "Windows coordinated to window schedule",
+        unit: "nr",
+        qty: windows.length,
+        scope: `${windows.length} unique scheduled window types/instances indexed with opening sizes and room associations.`,
+        sourcePages: [...new Set(windows.map((r) => r.page))],
+        evidence: `P${String(windows[0].page).padStart(2, "0")}-S01 · window schedule rows ${windows.map((r) => r.tag).join(", ")}`,
+        markupRef: `P${String(windows[0].page).padStart(2, "0")}-S01`,
+        status: "REVIEW",
+      });
+    if (doors.length)
+      mergeBoq({
+        id: "PACK-INTERNAL-DOOR-SCHEDULE",
+        page: doors[0].page,
+        room: "All rooms",
+        item: "Internal doors coordinated to door schedule",
+        unit: "nr",
+        qty: doors.length,
+        scope: `${doors.length} scheduled doors indexed with leaf widths, room and wall type.`,
+        sourcePages: [...new Set(doors.map((r) => r.page))],
+        evidence: `P${String(doors[0].page).padStart(2, "0")}-S02 · door schedule rows ${doors.map((r) => r.tag).join(", ")}`,
+        markupRef: `P${String(doors[0].page).padStart(2, "0")}-S02`,
+        status: "REVIEW",
+      });
+    if (externalCandidates.length)
+      mergeBoq({
+        id: "PACK-EXTERNAL-DOOR-TAGS",
+        page: 3,
+        room: "External envelope",
+        item: "External door tags requiring elevation reconciliation",
+        unit: "nr",
+        qty: externalCandidates.length,
+        scope:
+          "Explicit plan door tags not present in the internal door schedule; retain for elevation and external-door schedule review.",
+        evidence: `P03-S03 · plan tag index ${externalCandidates.join(", ")} · schedule exception`,
+        markupRef: "P03-S03",
+        status: "REVIEW",
+      });
+  };
+  const changed = (row: BoqDraft) => {
+    const b = baseline?.boq[row.id];
+    return (
+      !!baseline &&
+      (!b ||
+        Math.abs(b.qty - row.qty) > 0.005 ||
+        b.scope !== row.scope ||
+        b.evidence !== row.evidence)
+    );
+  };
+  const docChanges = useMemo(() => {
+    if (!baseline?.manifest || !manifest) return [];
+    const old = new Map(baseline.manifest.documents.map((d) => [d.name, d])),
+      now = new Map(manifest.documents.map((d) => [d.name, d])),
+      names = new Set([...old.keys(), ...now.keys()]);
+    return [...names].flatMap((name) => {
+      const a = old.get(name),
+        b = now.get(name);
+      if (!a)
+        return [{ name, state: "ADDED", detail: `${b?.pages || 0} pages` }];
+      if (!b)
+        return [{ name, state: "REMOVED", detail: `was ${a.pages} pages` }];
+      if (a.fingerprint !== b.fingerprint || a.pages !== b.pages) {
+        const oldSheets = new Map(a.sheets.map((s) => [s.page, s])),
+          newSheets = new Map(b.sheets.map((s) => [s.page, s])),
+          pages = new Set([...oldSheets.keys(), ...newSheets.keys()]),
+          sheetChanges = [...pages].flatMap((page) => {
+            const before = oldSheets.get(page),
+              after = newSheets.get(page);
+            if (!before) return [`P${page} added`];
+            if (!after) return [`P${page} removed`];
+            const kinds: string[] = [];
+            if (before.fingerprint !== after.fingerprint)
+              kinds.push("drawing/text");
+            if (before.dimensions.join(",") !== after.dimensions.join(","))
+              kinds.push("dimensions");
+            if (before.openingRefs.join(",") !== after.openingRefs.join(","))
+              kinds.push("door/window schedule refs");
+            if (before.clauseFingerprint !== after.clauseFingerprint)
+              kinds.push("specification clauses");
+            return kinds.length ? [`P${page}: ${kinds.join(", ")}`] : [];
+          });
+        return [
+          {
+            name,
+            state: "CHANGED",
+            detail:
+              sheetChanges.slice(0, 8).join(" · ") ||
+              `${a.pages} → ${b.pages} pages`,
+          },
+        ];
+      }
+      return [];
+    });
+  }, [baseline, manifest]);
+  const measured = boq.filter((r) => r.qty > 0),
+    unmeasured = boq.filter((r) => !r.qty),
+    gifa = Object.values(gifaByFloor).reduce((a, b) => a + b, 0),
+    approvedCount = Object.values(approved).filter(Boolean).length;
+  const ref = (r: BoqDraft) =>
+    r.markupRef || r.evidence.match(/\bP\d{2}-[A-Z]\d{2}\b/)?.[0] || "";
+  const lock = () => {
+    setLockedRev(revision);
+    setBaseline({
+      boq: Object.fromEntries(
+        boq.map((r) => [
+          r.id,
+          { qty: r.qty, scope: r.scope, evidence: r.evidence },
+        ]),
+      ),
+      manifest,
+      gifa: { ...gifaByFloor },
+    });
+  };
+  const newRevision = () => {
+    if (!lockedRev) return;
+    setRevision((v) => v + 1);
+    setApproved({});
+    setView("revision");
+  };
+  const upload = (files: File[]) => {
+    sources
+      .filter((s) => s.url.startsWith("blob:"))
+      .forEach((s) => URL.revokeObjectURL(s.url));
+    setSources(
+      files.map((f) => ({
+        name: f.name,
+        url: URL.createObjectURL(f),
+        revision: `Rev ${revision}`,
+      })),
+    );
+    setManifest(null);
+    setView("drawing");
+  };
+  const exportBoq = () => {
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`,
+      rows = [
+        [
+          "Ref",
+          "Markup",
+          "Location",
+          "Description",
+          "Scope",
+          "Qty",
+          "Unit",
+          "Evidence",
+          "Status",
+        ],
+        ...boq.map((r, i) => [
+          String(i + 1).padStart(3, "0"),
+          ref(r),
+          r.room,
+          r.item,
+          r.scope,
+          r.qty || "",
+          r.unit,
+          r.evidence,
+          approved[r.id] ? "APPROVED" : r.status,
+        ]),
+      ],
+      blob = new Blob([rows.map((row) => row.map(esc).join(",")).join("\n")], {
+        type: "text/csv",
+      }),
+      a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `HX-Takeoff-Test-001-Rev-${revision}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  const elementRows = nrmElements.map((name) => {
+    const rows = boq.filter((r) => {
+      const t = r.item.toLowerCase();
+      if (name === "Substructure")
+        return /(foundation|substructure|excavat|ground-floor|membrane)/.test(
+          t,
+        );
+      if (name === "Superstructure")
+        return /(external wall|partition|roof|window|door|stair|insulation)/.test(
+          t,
+        );
+      if (name === "Internal finishes")
+        return /(finish|ceiling|skirting|decor|lining|tiling)/.test(t);
+      if (name === "Services")
+        return /(plumb|heating|vent|elect|light|fire|drain|rainwater)/.test(t);
+      if (name === "External works")
+        return /external works|paving|landscap/.test(t);
+      return false;
+    });
+    const quantity = rows.reduce((a, r) => a + r.qty, 0),
+      rate = rates[name] || 0;
+    return { name, rows, quantity, rate, cost: quantity * rate };
+  });
+  return (
+    <main className="app-shell">
+      <header className="app-header">
+        <div className="brand">
+          <i>HX</i>
+          <span>TAKEOFF</span>
+        </div>
+        <div>
+          <strong>TEST 001</strong>
+          <span>DH415BB-3 · coordinated construction take-off</span>
+        </div>
+        <em>DH</em>
+      </header>
+      <div className="revision-bar">
+        <strong>REV {revision}</strong>
+        {lockedRev === revision ? (
+          <span className="lock-state">
+            <LockKeyhole size={14} /> LOCKED BASELINE
+          </span>
+        ) : (
+          <button onClick={lock}>
+            <LockKeyhole size={14} /> LOCK REV {revision}
+          </button>
+        )}
+        <button onClick={newRevision} disabled={!lockedRev}>
+          ＋ NEW REVISION PACK
+        </button>
+        <span>
+          {measured.length} measured · {unmeasured.length} unresolved ·{" "}
+          {approvedCount} approved
+        </span>
+      </div>
+      <nav className="app-nav">
+        {(["drawing", "boq", "nrm", "revision"] as const).map((x) => (
+          <button
+            key={x}
+            onClick={() => setView(x)}
+            className={view === x ? "active" : ""}
+          >
+            {x === "nrm" ? "NRM1 COST PLAN" : x.toUpperCase()}
+          </button>
+        ))}
+      </nav>
+      {view === "drawing" && (
+        <section className="workspace-layout">
+          <aside className="pack-panel">
+            <h3>INFORMATION PACK</h3>
+            <button
+              className="primary"
+              onClick={() => {
+                setSources([
+                  {
+                    name: "DH415BB-3 Construction Drawing Pack",
+                    url: "/api/test001",
+                    revision: "Construction Issue",
+                  },
+                ]);
+                setManifest(null);
+              }}
+            >
+              LOAD TEST 001
+            </button>
+            <label className="file-drop">
+              <Upload size={18} />
+              <span>Drop or select the complete pack</span>
+              <small>
+                Plans, elevations, details, schedules and specification PDFs are
+                indexed together.
+              </small>
+              <input
+                type="file"
+                accept="application/pdf"
+                multiple
+                onChange={(e) => upload(Array.from(e.target.files || []))}
+              />
+            </label>
+            <div className="pack-list">
+              {sources.map((s) => (
+                <div key={s.name}>
+                  <FileText size={15} />
+                  <span>
+                    {s.name}
+                    <small>{s.revision}</small>
+                  </span>
+                </div>
+              ))}
+            </div>
+            <h3>PACK STATUS</h3>
+            <dl>
+              <div>
+                <dt>Documents</dt>
+                <dd>{sources.length}</dd>
+              </div>
+              <div>
+                <dt>Indexed openings</dt>
+                <dd>{manifest?.openingRows.length || 0}</dd>
+              </div>
+              <div>
+                <dt>Measured lines</dt>
+                <dd>{measured.length}</dd>
+              </div>
+              <div>
+                <dt>GIFA</dt>
+                <dd>{gifa ? `${gifa.toFixed(2)} m²` : "Unmeasured"}</dd>
+              </div>
+            </dl>
+            <p className="guardrail">
+              HX records a quantity only where geometry and calibration evidence
+              are retained. Unsupported work stays explicitly unmeasured.
+            </p>
+          </aside>
+          <div className="drawing-panel">
+            <PdfCanvas
+              sources={sources}
+              onBoq={mergeBoq}
+              onManifest={handleManifest}
+              onGifa={(floor, area) =>
+                setGifaByFloor((v) => ({ ...v, [floor]: area }))
+              }
+              focusMarkup={focusMarkup}
+            />
+          </div>
+          <aside className="review-panel">
+            <div className="review-panel-head">
+              <h3>LIVE BOQ REVIEW</h3>
+              <button onClick={() => setView("boq")}>OPEN FULL BOQ</button>
+            </div>
+            <p>
+              Select a measured line to return to its drawing evidence. Approve
+              only after reviewing the retained markup.
+            </p>
+            {measured.length ? (
+              measured
+                .slice(-12)
+                .reverse()
+                .map((row) => (
+                  <article
+                    key={row.id}
+                    className={
+                      changed(row) ? "review-card changed" : "review-card"
+                    }
+                  >
+                    <button
+                      className="link-button"
+                      onClick={() => setFocusMarkup(ref(row))}
+                    >
+                      {ref(row) || `P${row.page}`}
+                    </button>
+                    <strong>{row.item}</strong>
+                    <span>{row.room}</span>
+                    <b>
+                      {row.qty.toFixed(2)} {row.unit}
+                    </b>
+                    <button
+                      className="approve"
+                      onClick={() =>
+                        setApproved((v) => ({ ...v, [row.id]: !v[row.id] }))
+                      }
+                    >
+                      {approved[row.id] ? "APPROVED ✓" : "APPROVE LINE"}
+                    </button>
+                  </article>
+                ))
+            ) : (
+              <div className="empty-review">
+                No measured lines yet. Select a room label or choose a take-off
+                tool on the drawing.
+              </div>
+            )}
+          </aside>
+        </section>
+      )}
+      {view === "boq" && (
+        <section className="table-page">
+          <div className="section-head">
+            <div>
+              <h2>Evidence-linked BOQ</h2>
+              <p>
+                Every measured line opens its retained drawing markup. Zero
+                quantities are unresolved, not estimates.
+              </p>
+            </div>
+            <div>
+              <button onClick={() => setChangesOnly((v) => !v)}>
+                {changesOnly ? "SHOW ALL" : "CHANGES ONLY"}
+              </button>
+              <button onClick={exportBoq}>EXPORT CSV</button>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Filter room, item or scope"
+              />
+            </div>
+          </div>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  {[
+                    "Ref",
+                    "Markup",
+                    "Location",
+                    "Description",
+                    "Scope / coordination",
+                    "Qty",
+                    "Unit",
+                    "Evidence",
+                    "Status",
+                  ].map((h) => (
+                    <th key={h}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {boq
+                  .filter(
+                    (r) =>
+                      (!changesOnly || changed(r)) &&
+                      (!search ||
+                        `${r.room} ${r.item} ${r.scope}`
+                          .toLowerCase()
+                          .includes(search.toLowerCase())),
+                  )
+                  .map((r, i) => (
+                    <tr key={r.id} className={changed(r) ? "changed" : ""}>
+                      <td>{String(i + 1).padStart(3, "0")}</td>
+                      <td>
+                        {ref(r) ? (
+                          <button
+                            className="link-button"
+                            onClick={() => {
+                              setFocusMarkup(ref(r));
+                              setView("drawing");
+                            }}
+                          >
+                            {ref(r)}
+                          </button>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td>{r.room}</td>
+                      <td>
+                        <strong>{r.item}</strong>
+                        {changed(r) && (
+                          <small>REVISION CHANGE · review required</small>
+                        )}
+                      </td>
+                      <td>{r.scope}</td>
+                      <td className="number">
+                        {r.qty ? r.qty.toFixed(2) : "—"}
+                      </td>
+                      <td>{r.unit}</td>
+                      <td>{r.evidence}</td>
+                      <td>
+                        <span
+                          className={`status ${approved[r.id] ? "approved" : r.qty ? "review" : "unmeasured"}`}
+                        >
+                          {approved[r.id]
+                            ? "APPROVED"
+                            : r.qty
+                              ? "REVIEW"
+                              : "UNMEASURED"}
+                        </span>
+                        {r.qty > 0 && (
+                          <button
+                            className="approve"
+                            onClick={() =>
+                              setApproved((v) => ({ ...v, [r.id]: !v[r.id] }))
+                            }
+                          >
+                            {approved[r.id] ? "Undo" : "Approve"}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+      {view === "nrm" && (
+        <section className="table-page">
+          <div className="section-head">
+            <div>
+              <h2>NRM1 elemental cost plan</h2>
+              <p>GIFA is sourced only from reviewed external-face polygons.</p>
+            </div>
+            <strong className="gifa-total">
+              GIFA {gifa ? `${gifa.toFixed(2)} m²` : "UNMEASURED"}
+            </strong>
+          </div>
+          <div className="gifa-grid">
+            {Object.entries(gifaByFloor).map(([floor, area]) => (
+              <div key={floor}>
+                <span>{floor}</span>
+                <strong>{area.toFixed(2)} m²</strong>
+              </div>
+            ))}
+          </div>
+          <table>
+            <thead>
+              <tr>
+                {[
+                  "NRM1 element",
+                  "Evidence-linked BOQ lines",
+                  "Quantity",
+                  "Rate",
+                  "Cost",
+                  "£/m² GIFA",
+                  "Status",
+                ].map((h) => (
+                  <th key={h}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {elementRows.map((x) => (
+                <tr key={x.name}>
+                  <td>
+                    <strong>{x.name}</strong>
+                  </td>
+                  <td>{x.rows.length || "—"}</td>
+                  <td>{x.quantity ? x.quantity.toFixed(2) : "—"}</td>
+                  <td>
+                    <input
+                      type="number"
+                      value={x.rate || ""}
+                      onChange={(e) =>
+                        setRates((v) => ({
+                          ...v,
+                          [x.name]: Number(e.target.value),
+                        }))
+                      }
+                      placeholder="£ rate"
+                    />
+                  </td>
+                  <td>
+                    {x.cost
+                      ? `£${x.cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                      : "—"}
+                  </td>
+                  <td>
+                    {x.cost && gifa ? `£${(x.cost / gifa).toFixed(2)}` : "—"}
+                  </td>
+                  <td>
+                    <span
+                      className={`status ${x.quantity && x.rate ? "approved" : "unmeasured"}`}
+                    >
+                      {x.quantity && x.rate ? "COSTED" : "UNRESOLVED"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+      {view === "revision" && (
+        <section className="revision-page">
+          <div className="section-head">
+            <div>
+              <h2>Revision comparison</h2>
+              <p>
+                Document, geometry, scope, evidence and quantity changes remain
+                review-controlled.
+              </p>
+            </div>
+            <strong>
+              {baseline
+                ? `REV ${lockedRev} → REV ${revision}`
+                : "NO LOCKED BASELINE"}
+            </strong>
+          </div>
+          <div className="revision-columns">
+            <article>
+              <h3>DOCUMENT CHANGES</h3>
+              {docChanges.length ? (
+                docChanges.map((x) => (
+                  <div className="change-card" key={x.name}>
+                    <span>{x.state}</span>
+                    <strong>{x.name}</strong>
+                    <p>{x.detail}</p>
+                  </div>
+                ))
+              ) : (
+                <p>No document-level differences detected.</p>
+              )}
+            </article>
+            <article>
+              <h3>AFFECTED BOQ LINES</h3>
+              {boq.filter(changed).length ? (
+                boq.filter(changed).map((r) => (
+                  <button
+                    className="change-card"
+                    key={r.id}
+                    onClick={() => {
+                      setSearch(r.item);
+                      setChangesOnly(true);
+                      setView("boq");
+                    }}
+                  >
+                    <span>REVIEW</span>
+                    <strong>
+                      {r.room} · {r.item}
+                    </strong>
+                    <p>
+                      {baseline?.boq[r.id]
+                        ? `${baseline.boq[r.id].qty || "unmeasured"} → ${r.qty || "unmeasured"} ${r.unit}`
+                        : "New evidence-linked line"}
+                    </p>
+                  </button>
+                ))
+              ) : (
+                <p>No affected BOQ lines detected.</p>
+              )}
+            </article>
+          </div>
+        </section>
+      )}
+    </main>
+  );
+}
