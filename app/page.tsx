@@ -2,11 +2,41 @@
 import{useMemo,useRef,useState}from"react";import PdfCanvas,{type BoqDraft} from "./components/PdfCanvas";import{Upload,FileText,Ruler,ScanLine,CheckCircle2,Plus}from"lucide-react";
 const items:any[]=[];
 const seedBoq:BoqDraft[]=[
-{id:"T001-GF-FLOOR",page:3,room:"Ground Floor",item:"Floor finishes — measured take-off",unit:"m²",qty:0,scope:"Floor finish scope indexed from Test 001 construction information. Quantity pending geometry verification.",evidence:"TEST 001 · P3 drawing · scope indexed · geometry requires review",status:"REVIEW"},
-{id:"T001-GF-CEILING",page:3,room:"Ground Floor",item:"Ceiling finishes — measured take-off",unit:"m²",qty:0,scope:"Ceiling finish / lining scope indexed from Test 001. Quantity pending geometry verification.",evidence:"TEST 001 · P3 drawing · scope indexed · geometry requires review",status:"REVIEW"},
-{id:"T001-GF-SKIRT",page:3,room:"Ground Floor",item:"Skirtings / perimeter finishes",unit:"m",qty:0,scope:"Skirting / perimeter scope to be coordinated with room boundaries and openings.",evidence:"TEST 001 · P3 drawing · room boundaries/openings require review",status:"REVIEW"},
-{id:"T001-DOORS",page:3,room:"Ground Floor",item:"Internal doors",unit:"nr",qty:0,scope:"Door references coordinated against drawing tags and door schedule where matched.",evidence:"TEST 001 · drawing tags + schedule evidence · count requires review",status:"REVIEW"}
-];
+["PRELIMS","Project wide","Preliminaries / general requirements","item"],
+["SUBSTRUCTURE","Project wide","Foundations / substructure","m³"],
+["GROUNDWORKS","External / substructure","Excavation and earthworks","m³"],
+["DPC","Ground floor","DPC / membranes / radon / waterproofing","m²"],
+["GFLOOR","Ground floor","Ground floor construction","m²"],
+["EXTWALL","All elevations","External wall construction","m²"],
+["BRICK","All elevations","Facing brickwork / masonry finishes","m²"],
+["INTWALL","All floors","Internal partitions / wall construction","m²"],
+["LINING","All floors","Wall linings / plasterboard / ply lining","m²"],
+["ROOF","Roof","Roof structure and coverings","m²"],
+["INSUL","Project wide","Thermal / acoustic insulation","m²"],
+["WINDOW","All elevations","Windows","nr"],
+["EXTDOOR","All elevations","External doors","nr"],
+["INTDOOR","All floors","Internal doors / frames / ironmongery","nr"],
+["STAIR","Internal","Staircase / balustrades / handrails","item"],
+["FLOORFIN","All rooms","Floor finishes","m²"],
+["WALLFIN","All rooms","Wall finishes / decorations","m²"],
+["CEILING","All rooms","Ceilings / soffits / decorations","m²"],
+["SKIRT","All rooms","Skirtings / trims","m"],
+["JOINERY","Internal","Joinery / fitted items","item"],
+["KITCHEN","Kitchen","Kitchen fittings / worktops","item"],
+["SANITARY","Bathrooms / WC","Sanitaryware / bathroom fittings","nr"],
+["TILING","Bathrooms / kitchen","Wall and floor tiling","m²"],
+["PLUMB","Project wide","Plumbing / above-ground drainage","item"],
+["HEATING","Project wide","Heating installation","item"],
+["VENT","Project wide","Ventilation / extract","item"],
+["ELECT","Project wide","Electrical installation","item"],
+["LIGHT","Project wide","Lighting / accessories","nr"],
+["FIRE","Project wide","Fire stopping / fire protection","item"],
+["DRAIN","External","Below-ground drainage","m"],
+["EXTWORK","External","External works / paving / landscaping","m²"],
+["RAIN","External / roof","Rainwater goods","m"],
+["DECOR","Project wide","Decorations","m²"],
+["CLEAN","Project wide","Testing / commissioning / cleaning","item"]
+].map(([id,room,item,unit])=>({id:"T001-"+id,page:0,room,item,unit:unit as BoqDraft["unit"],qty:0,scope:"Test 001 package — scope and measured quantity to be coordinated from drawings, details, schedules and construction information.",evidence:"TEST 001 · full-package take-off register · measurement/evidence pending review",status:"REVIEW" as const}));
 export default function Home(){const[boq,setBoq]=useState<BoqDraft[]>(seedBoq);const[view,setView]=useState<"drawing"|"boq">("drawing");const mergeBoq=(row:BoqDraft)=>setBoq(v=>[...v.filter(x=>x.id!==row.id&&!(x.qty===0&&x.item.toLowerCase().includes(row.item.split(" / ")[0].toLowerCase()))),row]);const[sel,setSel]=useState("W01");const[calibrated,setCalibrated]=useState(false);const[tool,setTool]=useState<"length"|"area"|"count"|"calibrate">("calibrate");const[mmPerPct,setMmPerPct]=useState(0);const[aiObjects,setAiObjects]=useState(false);const[pdfUrl,setPdfUrl]=useState<string|null>("/api/test001");const[pts,setPts]=useState<{x:number,y:number}[]>([]);const board=useRef<HTMLDivElement>(null);const addPoint=(e:React.MouseEvent)=>{if((!calibrated&&tool!=="calibrate")||!board.current)return;const r=board.current.getBoundingClientRect();const q={x:(e.clientX-r.left)/r.width*100,y:(e.clientY-r.top)/r.height*100};if(tool==="calibrate"){setPts(p=>{const n=[...p,q].slice(-2);if(n.length===2){const d=Math.hypot(n[1].x-n[0].x,n[1].y-n[0].y);const known=Number(prompt("Known distance between these points (mm)","9000"));if(known>0&&d>0){setMmPerPct(known/d);setCalibrated(true)}}return n})}else setPts(p=>[...p,q])};const reset=()=>setPts([]);const qty=useMemo(()=>{if(tool==="calibrate")return 0;if(tool==="count")return pts.length;if(pts.length<2)return 0;if(tool==="length"){let n=0;for(let i=1;i<pts.length;i++)n+=Math.hypot(pts[i].x-pts[i-1].x,pts[i].y-pts[i-1].y);return n*mmPerPct/1000}if(pts.length<3)return 0;let a=0;for(let i=0;i<pts.length;i++){const j=(i+1)%pts.length;a+=pts[i].x*pts[j].y-pts[j].x*pts[i].y}return Math.abs(a/2)*mmPerPct*mmPerPct/1e6},[pts,tool,mmPerPct]);
 return <main><header><b><i>HX</i> TAKEOFF</b><span>TEST 001 · DH415BB-3 · Construction Issue</span><em>DH</em></header><nav>Projects　 <button onClick={()=>setView("drawing")} style={{fontWeight:view==="drawing"?800:400}}>Drawings</button>　 Documents　 Take-off　 <button onClick={()=>setView("boq")} style={{fontWeight:view==="boq"?800:400}}>BOQ</button></nav>
 {view==="boq"?<section style={{margin:20,background:"white",border:"1px solid #d8dde1"}}><div style={{padding:"16px",background:"#17232e",color:"white"}}><b>BOQ · REVIEW</b><div style={{fontSize:12,opacity:.8}}>TEST 001 · DH415BB-3 · measured items and extracted scope</div></div><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr>{["Ref","Location","Description","Scope / line item detail","Qty","Unit","Evidence","Status"].map(h=><th key={h} style={{textAlign:"left",padding:10,borderBottom:"1px solid #ddd"}}>{h}</th>)}</tr></thead><tbody>{boq.length?boq.map((r,i)=><tr key={r.id}><td style={{padding:10}}>{String(i+1).padStart(3,"0")}</td><td style={{padding:10}}>{r.room}</td><td style={{padding:10}}>{r.item}</td><td style={{padding:10,minWidth:300}}>{r.scope}</td><td style={{padding:10,fontWeight:800}}>{r.qty>0?r.qty.toFixed(2):"TBC"}</td><td style={{padding:10}}>{r.unit}</td><td style={{padding:10,minWidth:220}}>{r.evidence}</td><td style={{padding:10}}><mark>{r.status}</mark></td></tr>):<tr><td colSpan={8} style={{padding:30,textAlign:"center"}}><b>No measured BOQ lines yet.</b><div style={{marginTop:8}}>Return to Drawings, select/calibrate a room and use BUILD ROOM BOQ. Generated lines will appear here for review.</div><button onClick={()=>setView("drawing")} style={{marginTop:14}}>RETURN TO DRAWINGS</button></td></tr>}</tbody></table></div></section>:<><section className="hero"><div><small>MEASUREMENT ENGINE · TEST 001</small><h1>Drawing intelligence workspace.</h1><p>The complete DH415BB-3 construction issue package is the benchmark for document reading, geometry, coordination and take-off.</p></div><button><Plus size={17}/> New take-off</button></section>
