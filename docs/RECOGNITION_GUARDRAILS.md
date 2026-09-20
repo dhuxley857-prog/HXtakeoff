@@ -18,3 +18,13 @@ These rules are acceptance criteria for drawing intelligence and should be appli
 ## Regression cases
 - "Sitting Room" must be detected as a room.
 - "Ply lining" must not be detected or grouped as a room.
+
+
+## BOQ generation guardrails
+- A measured BOQ quantity must be derived from marked geometry on a specific PDF page.
+- Metric area requires explicit figured-dimension calibration; never assume printed scale.
+- Scope text must be quoted/paraphrased from indexed project documents and retain its source page in evidence where available.
+- If no relevant scope text is found, state that review is required; never invent a finish or specification.
+- Generated BOQ lines start in REVIEW and require human approval.
+- A room label, geometry boundary, scope clause and measurement are separate evidence objects; one must not silently overwrite another.
+- Corrections made during review should be retained as regression cases for future extraction.
