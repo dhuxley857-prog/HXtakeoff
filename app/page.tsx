@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FileText, LockKeyhole, Upload } from "lucide-react";
 import PdfCanvas, {
   type BoqDraft,
@@ -96,6 +96,51 @@ export default function Home() {
     [changesOnly, setChangesOnly] = useState(false),
     [gifaByFloor, setGifaByFloor] = useState<Record<string, number>>({}),
     [rates, setRates] = useState<Record<string, number>>({});
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("hx-takeoff-test001");
+      if (saved) {
+        const state = JSON.parse(saved);
+        if (Array.isArray(state.boq)) setBoq(state.boq);
+        if (Number.isFinite(state.revision)) setRevision(state.revision);
+        if (state.lockedRev === null || Number.isFinite(state.lockedRev))
+          setLockedRev(state.lockedRev);
+        if (state.baseline) setBaseline(state.baseline);
+        if (state.gifaByFloor) setGifaByFloor(state.gifaByFloor);
+        if (state.approved) setApproved(state.approved);
+        if (state.rates) setRates(state.rates);
+      }
+    } catch {
+      // A corrupt local checkpoint must never create or alter quantities.
+    } finally {
+      setHydrated(true);
+    }
+  }, []);
+  useEffect(() => {
+    if (!hydrated) return;
+    localStorage.setItem(
+      "hx-takeoff-test001",
+      JSON.stringify({
+        boq,
+        revision,
+        lockedRev,
+        baseline,
+        gifaByFloor,
+        approved,
+        rates,
+      }),
+    );
+  }, [
+    hydrated,
+    boq,
+    revision,
+    lockedRev,
+    baseline,
+    gifaByFloor,
+    approved,
+    rates,
+  ]);
   const mergeBoq = (row: BoqDraft) =>
     setBoq((v) =>
       [
@@ -449,6 +494,7 @@ export default function Home() {
                 setGifaByFloor((v) => ({ ...v, [floor]: area }))
               }
               focusMarkup={focusMarkup}
+              readOnly={lockedRev === revision}
             />
           </div>
           <aside className="review-panel">

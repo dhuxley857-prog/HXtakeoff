@@ -192,6 +192,7 @@ export default function PdfCanvas({
   onManifest,
   onGifa,
   focusMarkup,
+  readOnly = false,
 }: {
   url?: string;
   sources?: SourceDocument[];
@@ -199,6 +200,7 @@ export default function PdfCanvas({
   onManifest?: (manifest: PackManifest) => void;
   onGifa?: (floor: string, area: number, evidence: string) => void;
   focusMarkup?: string;
+  readOnly?: boolean;
 }) {
   const docs = useMemo(
     () =>
@@ -560,6 +562,7 @@ export default function PdfCanvas({
   const evidenceBase = (ref: string) =>
     `${ref} · ${currentDoc.name} · P${page} · ${manualCalibration.valid ? "two-point reviewed calibration" : `${autoCalibration?.accepted.length || 0} independently agreeing figured dimensions`} · ${currentScale.toFixed(3)} mm/PDF pt`;
   const runTopology = (room: Label) => {
+    if (readOnly) return;
     setSelectedRoom(room);
     setTrace([]);
     if (!pageSize || !currentScale) {
@@ -854,7 +857,7 @@ export default function PdfCanvas({
     setTool("inspect");
   };
   const clickDrawing = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (tool === "inspect") return;
+    if (tool === "inspect" || readOnly) return;
     const r = e.currentTarget.getBoundingClientRect(),
       p = {
         x: ((e.clientX - r.left) / r.width) * 100,
@@ -920,6 +923,7 @@ export default function PdfCanvas({
           (t) => (
             <button
               key={t}
+              disabled={readOnly && t !== "inspect"}
               onClick={() => {
                 setTool(t);
                 setTrace([]);
@@ -940,6 +944,7 @@ export default function PdfCanvas({
         {(["area", "length", "count"] as Tool[]).map((t) => (
           <button
             key={t}
+            disabled={readOnly}
             onClick={() => {
               setTool(t);
               setTrace([]);
@@ -952,6 +957,7 @@ export default function PdfCanvas({
         <button onClick={() => setTrace([])}>CLEAR</button>
       </div>
       <div className="evidence-strip">
+        {readOnly && <strong>LOCKED · START A NEW REVISION TO MEASURE</strong>}
         <strong>{activeScale ? "SCALE VALID" : "SCALE BLOCKED"}</strong>
         <span>
           {autoCalibration?.valid
@@ -1049,6 +1055,7 @@ export default function PdfCanvas({
         {labels.map((l, i) => (
           <button
             key={i}
+            disabled={readOnly}
             className={`room-label ${selectedRoom?.text === l.text ? "selected" : ""}`}
             style={{ left: l.x + "%", top: l.y + "%" }}
             onClick={(e) => {
