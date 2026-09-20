@@ -23,12 +23,18 @@ export function extractPdfLineSegments(
     restore: number;
     transform: number;
     constructPath: number;
+    setStrokeRGBColor?: number;
+    setFillRGBColor?: number;
+    setLineWidth?: number;
   },
   convert: (x: number, y: number) => [number, number],
 ): Segment[] {
   let ctm: Matrix = [1, 0, 0, 1, 0, 0],
     stack: Matrix[] = [],
-    segments: Segment[] = [];
+    segments: Segment[] = [],
+    stroke = "#000000",
+    fill = "#000000",
+    lineWidth = 0;
   for (let i = 0; i < fnArray.length; i++) {
     const fn = fnArray[i],
       args = argsArray[i];
@@ -44,8 +50,21 @@ export function extractPdfLineSegments(
       ctm = multiply(ctm, args as Matrix);
       continue;
     }
+    if (ops.setStrokeRGBColor !== undefined && fn === ops.setStrokeRGBColor) {
+      stroke = String(Array.isArray(args) ? args[0] : args);
+      continue;
+    }
+    if (ops.setFillRGBColor !== undefined && fn === ops.setFillRGBColor) {
+      fill = String(Array.isArray(args) ? args[0] : args);
+      continue;
+    }
+    if (ops.setLineWidth !== undefined && fn === ops.setLineWidth) {
+      lineWidth = Number(args?.[0] ?? 0);
+      continue;
+    }
     if (fn !== ops.constructPath) continue;
-    const chunks = Array.isArray(args?.[1]) ? args[1] : [];
+    const chunks = Array.isArray(args?.[1]) ? args[1] : [],
+      source = `stroke=${stroke};fill=${fill};width=${lineWidth};paint=${args?.[0]}`;
     for (const chunk of chunks) {
       let cursor = 0,
         current: Point | null = null,
@@ -60,7 +79,11 @@ export function extractPdfLineSegments(
           if (current) {
             const a = convert(current.x, current.y),
               b = convert(next.x, next.y);
-            segments.push({ a: { x: a[0], y: a[1] }, b: { x: b[0], y: b[1] } });
+            segments.push({
+              a: { x: a[0], y: a[1] },
+              b: { x: b[0], y: b[1] },
+              source,
+            });
           }
           current = next;
         } else if (op === 2) {
@@ -75,7 +98,11 @@ export function extractPdfLineSegments(
           if (current && start && !samePoint(current, start)) {
             const a = convert(current.x, current.y),
               b = convert(start.x, start.y);
-            segments.push({ a: { x: a[0], y: a[1] }, b: { x: b[0], y: b[1] } });
+            segments.push({
+              a: { x: a[0], y: a[1] },
+              b: { x: b[0], y: b[1] },
+              source,
+            });
           }
           current = start;
         } else break;

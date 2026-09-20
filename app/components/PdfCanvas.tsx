@@ -18,6 +18,7 @@ import {
   netFacadeArea,
   netPerimeter,
   netWallArea,
+  pointInPolygon,
   polygonArea,
   polygonPerimeter,
   selectRoomPolygon,
@@ -30,7 +31,13 @@ type PageKind =
 type Hit = { page: number; kind: PageKind; title: string };
 type Label = { text: string; x: number; y: number };
 type Dimension = Label & { mm: number };
-type Vector = { x1: number; y1: number; x2: number; y2: number };
+type Vector = {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  source?: string;
+};
 type Tool =
   | "inspect"
   | "calibrate"
@@ -394,6 +401,7 @@ export default function PdfCanvas({
             y1: (s.a.y / base.height) * 100,
             x2: (s.b.x / base.width) * 100,
             y2: (s.b.y / base.height) * 100,
+            source: s.source,
           }))
           .filter((s) => Math.hypot(s.x2 - s.x1, s.y2 - s.y1) > 0.2);
         if (cancelled) return;
@@ -560,27 +568,29 @@ export default function PdfCanvas({
       );
       return;
     }
-    const axis = vectors
-      .map(
-        (v) =>
-          ({ a: { x: v.x1, y: v.y1 }, b: { x: v.x2, y: v.y2 } }) as Segment,
-      )
-      .filter((s) => {
-        const dx = Math.abs(s.b.x - s.a.x),
-          dy = Math.abs(s.b.y - s.a.y),
-          len = Math.hypot(dx, dy),
-          inside =
-            Math.max(s.a.x, s.b.x) > room.x - 18 &&
-            Math.min(s.a.x, s.b.x) < room.x + 18 &&
-            Math.max(s.a.y, s.b.y) > room.y - 18 &&
-            Math.min(s.a.y, s.b.y) < room.y + 18;
-        return inside && len > 0.6 && len < 30 && (dx < 0.12 || dy < 0.12);
-      });
+    const styled = vectors.filter((v) => /width=(18|24);/.test(v.source || "")),
+      sourceVectors = styled.length > 40 ? styled : vectors,
+      axis = sourceVectors
+        .map(
+          (v) =>
+            ({ a: { x: v.x1, y: v.y1 }, b: { x: v.x2, y: v.y2 } }) as Segment,
+        )
+        .filter((s) => {
+          const dx = Math.abs(s.b.x - s.a.x),
+            dy = Math.abs(s.b.y - s.a.y),
+            len = Math.hypot(dx, dy),
+            inside =
+              Math.max(s.a.x, s.b.x) > room.x - 18 &&
+              Math.min(s.a.x, s.b.x) < room.x + 18 &&
+              Math.max(s.a.y, s.b.y) > room.y - 18 &&
+              Math.min(s.a.y, s.b.y) < room.y + 18;
+          return inside && len > 0.6 && len < 30 && (dx < 0.12 || dy < 0.12);
+        });
     const faces = buildClosedTopology(
-        bridgeCollinearGaps(axis, { axisTolerance: 0.08, maxGap: 5 }),
-        { snapTolerance: 0.08, minArea: 0.04, maxArea: 700 },
+        bridgeCollinearGaps(axis, { axisTolerance: 0.15, maxGap: 9 }),
+        { snapTolerance: 0.12, minArea: 0.04, maxArea: 1200 },
       ),
-      polygon = selectRoomPolygon(faces, room, { minArea: 0.2, maxArea: 500 });
+      polygon = selectRoomPolygon(faces, room, { minArea: 0.2, maxArea: 1000 });
     if (!polygon) {
       setTopologyNote(
         "No defensible closed face found. Trace the room boundary; HX will not substitute a rectangle.",
@@ -588,14 +598,21 @@ export default function PdfCanvas({
       setTool("room");
       return;
     }
-    const area = metricArea(polygon.points, pageSize, currentScale),
+    const enclosedLabels = labels.filter((label) =>
+        pointInPolygon(label, polygon.points),
+      ),
+      openPlanPair =
+        enclosedLabels.length === 2 &&
+        enclosedLabels.every((label) => /kitchen|dining/i.test(label.text)),
+      area = metricArea(polygon.points, pageSize, currentScale),
       perimeter = metricPerimeter(polygon.points, pageSize, currentScale),
       compactness = area > 0 ? (perimeter * perimeter) / area : Infinity;
     if (
       area < 2.5 ||
       area > 100 ||
       polygon.points.length > 16 ||
-      compactness > 45
+      compactness > 45 ||
+      (enclosedLabels.length > 1 && !openPlanPair)
     ) {
       setTopologyNote(
         "Topology candidate failed the room area/shape sanity gates and remains unmeasured. Trace the visible wall face for review.",
