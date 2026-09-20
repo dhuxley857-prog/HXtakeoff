@@ -56,9 +56,23 @@ const seed: BoqDraft[] = register.map(([id, room, item, unit]) => ({
   status: "UNMEASURED",
 }));
 type Baseline = {
-  boq: Record<string, { qty: number; scope: string; evidence: string }>;
+  boq: Record<
+    string,
+    {
+      qty: number;
+      scope: string;
+      evidence: string;
+      item?: string;
+      room?: string;
+      unit?: BoqDraft["unit"];
+    }
+  >;
   manifest: PackManifest | null;
   gifa: Record<string, number>;
+  approved?: Record<string, boolean>;
+  rates?: Record<string, number>;
+  revision?: number;
+  lockedAt?: string;
 };
 const nrmElements = [
   "Facilitating works",
@@ -281,19 +295,41 @@ export default function Home() {
     unmeasured = boq.filter((r) => !r.qty),
     gifa = Object.values(gifaByFloor).reduce((a, b) => a + b, 0),
     approvedCount = Object.values(approved).filter(Boolean).length;
+  const acceptanceIssues = [
+    !manifest || manifest.documents.length !== sources.length
+      ? "Complete information pack has not been indexed"
+      : "",
+    !gifa ? "External-face GIFA has not been reviewed" : "",
+    !measured.length ? "No evidence-linked quantities have been measured" : "",
+    measured.some((row) => !approved[row.id])
+      ? "Every measured BOQ line must be approved"
+      : "",
+  ].filter(Boolean);
   const ref = (r: BoqDraft) =>
     r.markupRef || r.evidence.match(/\bP\d{2}-[A-Z]\d{2}\b/)?.[0] || "";
   const lock = () => {
+    if (baseline || acceptanceIssues.length) return;
     setLockedRev(revision);
     setBaseline({
       boq: Object.fromEntries(
         boq.map((r) => [
           r.id,
-          { qty: r.qty, scope: r.scope, evidence: r.evidence },
+          {
+            qty: r.qty,
+            scope: r.scope,
+            evidence: r.evidence,
+            item: r.item,
+            room: r.room,
+            unit: r.unit,
+          },
         ]),
       ),
       manifest,
       gifa: { ...gifaByFloor },
+      approved: { ...approved },
+      rates: { ...rates },
+      revision,
+      lockedAt: new Date().toISOString(),
     });
   };
   const newRevision = () => {
@@ -374,6 +410,80 @@ export default function Home() {
       rate = rates[name] || 0;
     return { name, rows, quantity, rate, cost: quantity * rate };
   });
+  const boqChanges = useMemo(() => {
+    if (!baseline) return [];
+    const current = new Map(boq.map((row) => [row.id, row]));
+    const changedCurrent = boq.flatMap((row) => {
+      const before = baseline.boq[row.id];
+      if (
+        before &&
+        Math.abs(before.qty - row.qty) <= 0.005 &&
+        before.scope === row.scope &&
+        before.evidence === row.evidence
+      )
+        return [];
+      return [
+        {
+          id: row.id,
+          item: row.item,
+          room: row.room,
+          unit: row.unit,
+          before: before?.qty,
+          after: row.qty,
+          state: before ? "CHANGED" : "ADDED",
+        },
+      ];
+    });
+    const removed = Object.entries(baseline.boq).flatMap(([id, before]) =>
+      current.has(id)
+        ? []
+        : [
+            {
+              id,
+              item: before.item || id,
+              room: before.room || "Baseline",
+              unit: before.unit || "item",
+              before: before.qty,
+              after: undefined,
+              state: "REMOVED",
+            },
+          ],
+    );
+    return [...changedCurrent, ...removed];
+  }, [baseline, boq]);
+  const exportNrm = () => {
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`,
+      rows = [
+        [
+          "NRM1 element",
+          "Evidence-linked BOQ lines",
+          "Quantity",
+          "Rate",
+          "Cost",
+          "Cost/GIFA",
+          "GIFA",
+          "Status",
+        ],
+        ...elementRows.map((row) => [
+          row.name,
+          row.rows.map((line) => line.id).join(" | "),
+          row.quantity || "",
+          row.rate || "",
+          row.cost || "",
+          row.cost && gifa ? row.cost / gifa : "",
+          gifa || "",
+          row.quantity && row.rate ? "COSTED" : "UNRESOLVED",
+        ]),
+      ],
+      blob = new Blob([rows.map((row) => row.map(esc).join(",")).join("\n")], {
+        type: "text/csv",
+      }),
+      a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `HX-Takeoff-Test-001-NRM1-Rev-${revision}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -389,12 +499,16 @@ export default function Home() {
       </header>
       <div className="revision-bar">
         <strong>REV {revision}</strong>
-        {lockedRev === revision ? (
+        {baseline ? (
           <span className="lock-state">
-            <LockKeyhole size={14} /> LOCKED BASELINE
+            <LockKeyhole size={14} /> REV {lockedRev} BASELINE LOCKED
           </span>
         ) : (
-          <button onClick={lock}>
+          <button
+            onClick={lock}
+            disabled={acceptanceIssues.length > 0}
+            title={acceptanceIssues.join(" · ")}
+          >
             <LockKeyhole size={14} /> LOCK REV {revision}
           </button>
         )}
@@ -484,6 +598,18 @@ export default function Home() {
               HX records a quantity only where geometry and calibration evidence
               are retained. Unsupported work stays explicitly unmeasured.
             </p>
+            <h3>REV 1 ACCEPTANCE</h3>
+            {acceptanceIssues.length ? (
+              <ul className="acceptance-list">
+                {acceptanceIssues.map((issue) => (
+                  <li key={issue}>{issue}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="acceptance-ready">
+                Pack, GIFA and line approvals complete. Rev 1 can be locked.
+              </p>
+            )}
           </aside>
           <div className="drawing-panel">
             <PdfCanvas
@@ -664,9 +790,12 @@ export default function Home() {
               <h2>NRM1 elemental cost plan</h2>
               <p>GIFA is sourced only from reviewed external-face polygons.</p>
             </div>
-            <strong className="gifa-total">
-              GIFA {gifa ? `${gifa.toFixed(2)} m²` : "UNMEASURED"}
-            </strong>
+            <div>
+              <strong className="gifa-total">
+                GIFA {gifa ? `${gifa.toFixed(2)} m²` : "UNMEASURED"}
+              </strong>
+              <button onClick={exportNrm}>EXPORT NRM1 CSV</button>
+            </div>
           </div>
           <div className="gifa-grid">
             {Object.entries(gifaByFloor).map(([floor, area]) => (
@@ -764,28 +893,46 @@ export default function Home() {
               ) : (
                 <p>No document-level differences detected.</p>
               )}
+              <h3>GIFA CHANGES</h3>
+              {baseline &&
+              JSON.stringify(baseline.gifa) !== JSON.stringify(gifaByFloor) ? (
+                <div className="change-card">
+                  <span>CHANGED</span>
+                  <strong>External-face floor areas</strong>
+                  <p>
+                    {Object.values(baseline.gifa)
+                      .reduce((a, b) => a + b, 0)
+                      .toFixed(2)}{" "}
+                    → {gifa.toFixed(2)} m²
+                  </p>
+                </div>
+              ) : (
+                <p>No GIFA differences detected.</p>
+              )}
             </article>
             <article>
               <h3>AFFECTED BOQ LINES</h3>
-              {boq.filter(changed).length ? (
-                boq.filter(changed).map((r) => (
+              {boqChanges.length ? (
+                boqChanges.map((change) => (
                   <button
                     className="change-card"
-                    key={r.id}
+                    key={change.id}
                     onClick={() => {
-                      setSearch(r.item);
+                      setSearch(change.item);
                       setChangesOnly(true);
                       setView("boq");
                     }}
                   >
-                    <span>REVIEW</span>
+                    <span>{change.state}</span>
                     <strong>
-                      {r.room} · {r.item}
+                      {change.room} · {change.item}
                     </strong>
                     <p>
-                      {baseline?.boq[r.id]
-                        ? `${baseline.boq[r.id].qty || "unmeasured"} → ${r.qty || "unmeasured"} ${r.unit}`
-                        : "New evidence-linked line"}
+                      {change.state === "ADDED"
+                        ? `New evidence-linked line · ${change.after || "unmeasured"} ${change.unit}`
+                        : change.state === "REMOVED"
+                          ? `${change.before || "unmeasured"} ${change.unit} → removed`
+                          : `${change.before || "unmeasured"} → ${change.after || "unmeasured"} ${change.unit}`}
                     </p>
                   </button>
                 ))

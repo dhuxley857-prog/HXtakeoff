@@ -501,6 +501,23 @@ button {
   border-left: 3px solid #c8a34b;
   padding: 10px;
 }
+.acceptance-list {
+  margin: 0;
+  padding: 10px 10px 10px 27px;
+  background: #fff3f1;
+  border-left: 3px solid #b42318;
+  color: #7a271a;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.acceptance-ready {
+  padding: 10px;
+  background: #eaf7ef;
+  border-left: 3px solid #2d7058;
+  color: #205b43;
+  font-size: 11px;
+  line-height: 1.45;
+}
 .drawing-panel {
   min-width: 0;
   background: #dfe3e5;
@@ -825,6 +842,8 @@ td small {
   font-size: 11px;
 }
 .gifa-total {
+  display: block;
+  margin-bottom: 7px;
   font-size: 18px;
   color: #e2c067;
 }
