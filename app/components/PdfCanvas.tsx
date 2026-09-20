@@ -588,10 +588,17 @@ export default function PdfCanvas({
       setTool("room");
       return;
     }
-    const area = metricArea(polygon.points, pageSize, currentScale);
-    if (area < 1 || area > 100) {
+    const area = metricArea(polygon.points, pageSize, currentScale),
+      perimeter = metricPerimeter(polygon.points, pageSize, currentScale),
+      compactness = area > 0 ? (perimeter * perimeter) / area : Infinity;
+    if (
+      area < 2.5 ||
+      area > 100 ||
+      polygon.points.length > 16 ||
+      compactness > 45
+    ) {
       setTopologyNote(
-        "Topology candidate failed the 1–100 m² room sanity gate and remains unmeasured.",
+        "Topology candidate failed the room area/shape sanity gates and remains unmeasured. Trace the visible wall face for review.",
       );
       setTool("room");
       return;
