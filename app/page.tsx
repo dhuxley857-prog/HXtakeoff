@@ -189,7 +189,7 @@ export default function Home() {
         qty: windows.length,
         scope: `${windows.length} unique scheduled window types/instances indexed with opening sizes and room associations.`,
         sourcePages: [...new Set(windows.map((r) => r.page))],
-        evidence: `P${String(windows[0].page).padStart(2, "0")}-S01 · window schedule rows ${windows.map((r) => r.tag).join(", ")}`,
+        evidence: `P${String(windows[0].page).padStart(2, "0")}-S01 · ${windows[0].document || "Schedule"} P${windows[0].page} · window schedule rows ${windows.map((r) => `${r.tag} → ${r.room}`).join(", ")}`,
         markupRef: `P${String(windows[0].page).padStart(2, "0")}-S01`,
         status: "REVIEW",
       });
@@ -203,7 +203,7 @@ export default function Home() {
         qty: doors.length,
         scope: `${doors.length} scheduled doors indexed with leaf widths, room and wall type.`,
         sourcePages: [...new Set(doors.map((r) => r.page))],
-        evidence: `P${String(doors[0].page).padStart(2, "0")}-S02 · door schedule rows ${doors.map((r) => r.tag).join(", ")}`,
+        evidence: `P${String(doors[0].page).padStart(2, "0")}-S02 · ${doors[0].document || "Schedule"} P${doors[0].page} · door schedule rows ${doors.map((r) => `${r.tag} → ${r.room}`).join(", ")}`,
         markupRef: `P${String(doors[0].page).padStart(2, "0")}-S02`,
         status: "REVIEW",
       });

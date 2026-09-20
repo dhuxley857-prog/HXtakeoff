@@ -228,9 +228,9 @@ export default function PdfCanvas({
     [doorRefs, setDoorRefs] = useState<Label[]>([]),
     [windowRefs, setWindowRefs] = useState<Label[]>([]);
   const [schedule, setSchedule] = useState<OpeningScheduleRow[]>([]),
-    [scopeLines, setScopeLines] = useState<{ page: number; text: string }[]>(
-      [],
-    );
+    [scopeLines, setScopeLines] = useState<
+      { document: string; page: number; text: string }[]
+    >([]);
   const [autoScale, setAutoScale] = useState<number | null>(null),
     [autoCalibration, setAutoCalibration] = useState<ReturnType<
       typeof validateCalibration
@@ -271,7 +271,7 @@ export default function PdfCanvas({
           import.meta.url,
         ).toString();
         const openings: OpeningScheduleRow[] = [],
-          scopes: { page: number; text: string }[] = [],
+          scopes: { document: string; page: number; text: string }[] = [],
           manifests: PackManifest["documents"] = [];
         let activeHits: Hit[] = [],
           activePdf: any = null;
@@ -333,7 +333,9 @@ export default function PdfCanvas({
             if (kind !== "OTHER") hits.push({ page: n, kind, title });
             if (kind === "SCHEDULE")
               openings.push(
-                ...parseOpeningSchedules(rowsFromPositionedText(items), n),
+                ...parseOpeningSchedules(rowsFromPositionedText(items), n).map(
+                  (row) => ({ ...row, document: source.name }),
+                ),
               );
             text
               .split(/(?<=[.;:])\s+/)
@@ -346,7 +348,13 @@ export default function PdfCanvas({
                   s.length < 320,
               )
               .slice(0, 20)
-              .forEach((s) => scopes.push({ page: n, text: s.trim() }));
+              .forEach((s) =>
+                scopes.push({
+                  document: source.name,
+                  page: n,
+                  text: s.trim(),
+                }),
+              );
           }
           manifests.push({
             name: source.name,
@@ -659,6 +667,13 @@ export default function PdfCanvas({
       ],
       base = evidenceBase(ref),
       scope = scopeFor(/floor|tile|timber|vinyl|carpet/i),
+      specRefs = scope
+        .map((s) => `${s.document} P${s.page}`)
+        .filter((value, index, all) => all.indexOf(value) === index)
+        .join(", "),
+      scheduleRefs = roomRows
+        .map((r) => `${r.tag} → ${r.document || "Schedule"} P${r.page}`)
+        .join(", "),
       rows: BoqDraft[] = [
         {
           id: `${ref}-FLOOR`,
@@ -671,7 +686,7 @@ export default function PdfCanvas({
             ? scope.map((s) => s.text).join(" | ")
             : "Measured floor area; finish specification not explicitly resolved.",
           sourcePages: scope.map((s) => s.page),
-          evidence: `${base} · closed ${trace.length}-vertex topology`,
+          evidence: `${base} · closed ${trace.length}-vertex topology${specRefs ? ` · specification ${specRefs}` : ""}`,
           markupRef: ref,
           status: "REVIEW",
         },
@@ -702,7 +717,7 @@ export default function PdfCanvas({
           ),
           scope: `Gross perimeter ${tracePerimeter.toFixed(2)} m less scheduled openings: ${doors.map((d) => `${d.tag} ${d.widthMm}mm`).join(", ") || "none resolved"}.`,
           sourcePages: [...new Set(doors.map((d) => d.page))],
-          evidence: `${base} · schedule deductions`,
+          evidence: `${base} · schedule deductions${scheduleRefs ? ` · ${scheduleRefs}` : " · no matched schedule rows"}`,
           markupRef: ref,
           status: "REVIEW",
         },
@@ -719,7 +734,7 @@ export default function PdfCanvas({
         ),
         scope: `Perimeter × independently repeated ${heightMm}mm height less ${doors.length} door and ${windows.length} window schedule opening(s).`,
         sourcePages: [...new Set(roomRows.map((r) => r.page))],
-        evidence: `${base} · repeated figured height ${heightMm}mm · schedule deductions`,
+        evidence: `${base} · repeated figured height ${heightMm}mm · schedule deductions${scheduleRefs ? ` · ${scheduleRefs}` : " · no matched schedule rows"}`,
         markupRef: ref,
         status: "REVIEW",
       });
@@ -771,6 +786,10 @@ export default function PdfCanvas({
         .at(-1),
       openings = markups.filter((m) => m.page === page && m.kind === "opening"),
       scope = scopeFor(/brick|stone|render|cladding|external wall/i),
+      specRefs = scope
+        .map((s) => `${s.document} P${s.page}`)
+        .filter((value, index, all) => all.indexOf(value) === index)
+        .join(", "),
       ref = facade?.ref || `P${String(page).padStart(2, "0")}-F01`;
     [
       {
@@ -792,7 +811,7 @@ export default function PdfCanvas({
         room: "Elevation",
         unit: "m²",
         sourcePages: scope.map((s) => s.page),
-        evidence: `${evidenceBase(ref)} · deductions ${openings.map((x) => x.ref).join(", ") || "none"}`,
+        evidence: `${evidenceBase(ref)} · deductions ${openings.map((x) => x.ref).join(", ") || "none"}${specRefs ? ` · specification ${specRefs}` : ""}`,
         markupRef: ref,
         status: "REVIEW",
       }),
@@ -837,7 +856,11 @@ export default function PdfCanvas({
             ? metricPolyline(trace, pageSize, currentScale)
             : metricArea(trace, pageSize, currentScale),
       ref = addMarkup("work", trace, item.label, measured, item.unit),
-      scope = scopeFor(item.rx);
+      scope = scopeFor(item.rx),
+      specRefs = scope
+        .map((s) => `${s.document} P${s.page}`)
+        .filter((value, index, all) => all.indexOf(value) === index)
+        .join(", ");
     onBoq?.({
       id: `${ref}-${item.label.replace(/\W+/g, "-").toUpperCase()}`,
       page,
@@ -849,7 +872,7 @@ export default function PdfCanvas({
         ? scope.map((s) => s.text).join(" | ")
         : "Measured geometry retained; construction build-up/specification remains unresolved.",
       sourcePages: scope.map((s) => s.page),
-      evidence: `${evidenceBase(ref)} · ${item.unit === "nr" ? `${trace.length} marked points` : `${trace.length}-vertex ${item.unit === "m" ? "polyline" : "polygon"}`}`,
+      evidence: `${evidenceBase(ref)} · ${item.unit === "nr" ? `${trace.length} marked points` : `${trace.length}-vertex ${item.unit === "m" ? "polyline" : "polygon"}`}${specRefs ? ` · specification ${specRefs}` : ""}`,
       markupRef: ref,
       status: "REVIEW",
     });

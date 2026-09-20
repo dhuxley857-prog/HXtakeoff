@@ -6,6 +6,7 @@ export type OpeningScheduleRow = {
   heightMm?: number;
   room: string;
   page: number;
+  document?: string;
   raw: string;
 };
 
