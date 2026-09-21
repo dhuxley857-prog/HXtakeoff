@@ -7,6 +7,8 @@ import {
   netPerimeter,
   netWallArea,
   polygonArea,
+  isSimplePolygon,
+  removePolygonSpurs,
   roomTopologyPasses,
   selectExternalFace,
   selectRoomPolygon,
@@ -50,6 +52,26 @@ test("polygon simplification removes CAD collinear nodes but retains an L shape"
   const simplified = simplifyPolygon(detailed, 0.05);
   assert.equal(simplified.length, 6);
   assert.ok(Math.abs(polygonArea(simplified) - 21) < 0.1);
+});
+test("CAD branch spurs are removed without changing the enclosed area", () => {
+  const branched = [
+    { x: 0, y: 0 },
+    { x: 5, y: 0 },
+    { x: 5, y: 2 },
+    { x: 7, y: 2 },
+    { x: 5, y: 2 },
+    { x: 5, y: 5 },
+    { x: 0, y: 5 },
+  ];
+  const cleaned = removePolygonSpurs(branched);
+  assert.equal(cleaned.length, 5);
+  assert.equal(polygonArea(cleaned), 25);
+  assert.equal(isSimplePolygon(cleaned), true);
+  assert.equal(isSimplePolygon(branched), false);
+  const rotated = [...branched.slice(4), ...branched.slice(0, 4)],
+    cyclicCleaned = removePolygonSpurs(rotated);
+  assert.equal(cyclicCleaned.length, 5);
+  assert.equal(isSimplePolygon(cyclicCleaned), true);
 });
 test("room topology gate accepts a supported L-shaped room but rejects complex faces", () => {
   assert.equal(

@@ -40,6 +40,8 @@ import {
   pointInPolygon,
   polygonArea,
   polygonPerimeter,
+  isSimplePolygon,
+  removePolygonSpurs,
   roomTopologyPasses,
   selectExternalFace,
   selectRoomPolygon,
@@ -342,7 +344,8 @@ export default function PdfCanvas({
   const [sheetHits, setSheetHits] = useState<Hit[]>([]),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
-    [pageSize, setPageSize] = useState<{ w: number; h: number } | null>(null);
+    [pageSize, setPageSize] = useState<{ w: number; h: number } | null>(null),
+    [pageText, setPageText] = useState("");
   const [vectors, setVectors] = useState<Vector[]>([]),
     [labels, setLabels] = useState<Label[]>([]),
     [dimensions, setDimensions] = useState<Dimension[]>([]),
@@ -587,6 +590,7 @@ export default function PdfCanvas({
           tc = await pg.getTextContent(),
           base = pg.getViewport({ scale: 1 }),
           text = (tc.items as any[]).map((x) => String(x.str || "")).join(" ");
+        setPageText(text);
         setPageKind(classify(text));
         setPageSize({ w: base.width, h: base.height });
         const op = await pg.getOperatorList();
@@ -1042,6 +1046,12 @@ export default function PdfCanvas({
   };
   const autoMeasureRooms = () => {
     if (readOnly || !pageSize || !currentScale) return;
+    if (/structural summary|foundation plan|ceiling level/i.test(pageText)) {
+      setTopologyNote(
+        "Room finishes skipped on this coordinated structural plan; architectural room topology is retained instead.",
+      );
+      return;
+    }
     const existing = new Set(
         markups
           .filter(
@@ -1096,9 +1106,20 @@ export default function PdfCanvas({
     setTrace([]);
   };
   const candidateForGifa = () => {
-    if (!pageSize || !currentScale || labels.length < 2) return null;
-    const styled = vectors.filter((v) => /width=(18|24);/.test(v.source || "")),
-      sourceVectors = styled.length > 40 ? styled : vectors,
+    if (!pageSize || !currentScale || labels.length < 2) return [];
+    const maximumOpeningMm = Math.min(
+        1500,
+        Math.max(1200, ...schedule.map((opening) => opening.widthMm || 0)),
+      ),
+      maxGapX = (maximumOpeningMm / (pageSize.w * currentScale)) * 100,
+      maxGapY = (maximumOpeningMm / (pageSize.h * currentScale)) * 100,
+      styled = vectors.filter((v) =>
+        /stroke=#000000;.*width=12;paint=20/.test(v.source || ""),
+      ),
+      fallback = vectors.filter((v) =>
+        /stroke=#(?:000000|808080|545454);/.test(v.source || ""),
+      ),
+      sourceVectors = styled.length > 100 ? styled : fallback,
       xs = labels.map((label) => label.x),
       ys = labels.map((label) => label.y),
       bounds = {
@@ -1125,30 +1146,69 @@ export default function PdfCanvas({
             inside && length > 0.6 && length < 80 && (dx < 0.12 || dy < 0.12)
           );
         });
-    if (axis.length < 4 || axis.length > 2500) return null;
+    if (axis.length < 4 || axis.length > 2500) return [];
     const polygons = buildClosedTopology(
-      bridgeCollinearGaps(axis, { axisTolerance: 0.15, maxGap: 9 }),
-      { snapTolerance: 0.12, minArea: 0.04, maxArea: 5000 },
-    );
-    return selectExternalFace(polygons, labels, {
-      areaOf: (polygon) => metricArea(polygon.points, pageSize, currentScale),
-      perimeterOf: (polygon) =>
-        metricPerimeter(polygon.points, pageSize, currentScale),
-      minArea: 30,
-      maxArea: 500,
-      minLabelCoverage: 0.7,
-      maxVertices: 40,
-      maxCompactness: 100,
+        bridgeCollinearGaps(axis, {
+          axisTolerance: 0.15,
+          maxGapX,
+          maxGapY,
+        }),
+        { snapTolerance: 0.12, minArea: 0.04, maxArea: 5000 },
+      )
+        .map((polygon) => {
+          const points = simplifyPolygon(
+            removePolygonSpurs(polygon.points),
+            0.12,
+          );
+          return {
+            ...polygon,
+            points,
+            area: polygonArea(points),
+            perimeter: polygonPerimeter(points),
+          };
+        })
+        .filter(
+          (polygon) =>
+            polygon.points.length >= 3 && isSimplePolygon(polygon.points, 0.02),
+        ),
+      floorGroups = labels.reduce((groups, label) => {
+        const separator = label.text.indexOf(" · "),
+          floor = separator > 0 ? label.text.slice(0, separator) : "Floor";
+        groups.set(floor, [...(groups.get(floor) || []), label]);
+        return groups;
+      }, new Map<string, Label[]>());
+    return [...floorGroups.entries()].flatMap(([floor, floorLabels]) => {
+      if (floorLabels.length < 2) return [];
+      const candidate = selectExternalFace(polygons, floorLabels, {
+        areaOf: (polygon) => metricArea(polygon.points, pageSize, currentScale),
+        perimeterOf: (polygon) =>
+          metricPerimeter(polygon.points, pageSize, currentScale),
+        minArea: 30,
+        maxArea: 500,
+        minLabelCoverage: 1,
+        maxVertices: 24,
+        maxCompactness: 80,
+      });
+      if (!candidate) return [];
+      const supported = candidate.polygon.points.filter((point) =>
+        snapPointToVectors(point, vectors, 0.25),
+      ).length;
+      return supported / candidate.polygon.points.length >= 0.8
+        ? [{ floor, candidate, labelCount: floorLabels.length }]
+        : [];
     });
   };
   const emitGifa = (
     points: { x: number; y: number }[],
     evidenceDetail: string,
+    floorName?: string,
   ) => {
     if (!pageSize || !currentScale || points.length < 3) return null;
     const area = metricArea(points, pageSize, currentScale),
       floorTitle =
-        sheetHits.find((hit) => hit.page === page)?.title || `Floor P${page}`,
+        floorName ||
+        sheetHits.find((hit) => hit.page === page)?.title ||
+        `Floor P${page}`,
       floor = `${docs.length > 1 ? `${currentDoc.name} · ` : ""}${floorTitle}`,
       ref = addMarkup("gifa", points, `${floor} external face`, area),
       evidence = `${evidenceBase(ref)} · ${evidenceDetail}`;
@@ -1170,27 +1230,35 @@ export default function PdfCanvas({
   };
   const autoMeasureGifa = () => {
     if (readOnly || !pageSize || !currentScale || pageKind !== "PLAN") return;
-    const existing = markups.some(
-      (markup) =>
-        markup.page === page &&
-        markup.kind === "gifa" &&
-        (!markup.document || markup.document === currentDoc.name),
+    if (/structural summary|foundation plan|ceiling level/i.test(pageText)) {
+      setTopologyNote(
+        "GIFA skipped on this coordinated structural plan; the architectural external-face source is retained instead.",
+      );
+      return;
+    }
+    const candidates = candidateForGifa().filter(({ floor }) =>
+      markups.every(
+        (markup) =>
+          markup.kind !== "gifa" || markup.label !== `${floor} external face`,
+      ),
     );
-    if (existing) return;
-    const candidate = candidateForGifa();
-    if (!candidate) {
+    if (!candidates.length) {
       setTopologyNote(
         "No defensible external-face GIFA polygon passed the closure, calibration, area, shape and room-enclosure gates. GIFA remains unmeasured for manual tracing.",
       );
       return;
     }
-    const ref = emitGifa(
-      candidate.polygon.points,
-      `automatic external-face closed topology · ${candidate.enclosedLabels.length}/${labels.length} room labels enclosed`,
-    );
-    if (ref)
+    const retained = candidates.flatMap(({ floor, candidate, labelCount }) => {
+      const ref = emitGifa(
+        candidate.polygon.points,
+        `automatic external-face closed topology · ${candidate.enclosedLabels.length}/${labelCount} ${floor.toLowerCase()} room labels enclosed · CAD branch spurs removed without changing enclosed area`,
+        floor,
+      );
+      return ref ? [ref] : [];
+    });
+    if (retained.length)
       setTopologyNote(
-        `${ref} retained as a review-only GIFA candidate · ${candidate.enclosedLabels.length}/${labels.length} room labels enclosed.`,
+        `${retained.join(", ")} retained as review-only external-face GIFA candidates for ${retained.length} floor${retained.length === 1 ? "" : "s"}.`,
       );
     setTool("inspect");
     setTrace([]);

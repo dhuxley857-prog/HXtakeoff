@@ -72,6 +72,50 @@ export function simplifyPolygon(points: Point[], tolerance = 0.1) {
   }
   return simplified;
 }
+export function removePolygonSpurs(points: Point[], tolerance = 0.05) {
+  const cleanLinear = (input: Point[]) => {
+    let cleaned = [...input],
+      changed = true;
+    while (changed && cleaned.length > 3) {
+      changed = false;
+      outer: for (let i = 0; i < cleaned.length; i++)
+        for (let j = i + 2; j < cleaned.length; j++) {
+          if (!same(cleaned[i], cleaned[j], tolerance)) continue;
+          const loop = cleaned.slice(i, j + 1);
+          if (polygonArea(loop) > tolerance * tolerance * 4) continue;
+          cleaned = [...cleaned.slice(0, i + 1), ...cleaned.slice(j + 1)];
+          changed = true;
+          break outer;
+        }
+    }
+    return cleaned;
+  };
+  let best = cleanLinear(points);
+  for (let offset = 1; offset < points.length; offset++) {
+    const rotated = [...points.slice(offset), ...points.slice(0, offset)],
+      candidate = cleanLinear(rotated);
+    if (candidate.length < best.length) best = candidate;
+  }
+  return best;
+}
+
+export function isSimplePolygon(points: Point[], tolerance = 1e-6) {
+  if (points.length < 3) return false;
+  for (let i = 0; i < points.length; i++)
+    for (let j = i + 1; j < points.length; j++) {
+      const adjacent = j === i + 1 || (i === 0 && j === points.length - 1);
+      if (!adjacent && same(points[i], points[j], tolerance)) return false;
+    }
+  for (let i = 0; i < points.length; i++) {
+    const a: Segment = { a: points[i], b: points[(i + 1) % points.length] };
+    for (let j = i + 1; j < points.length; j++) {
+      if (j === i + 1 || (i === 0 && j === points.length - 1)) continue;
+      const b: Segment = { a: points[j], b: points[(j + 1) % points.length] };
+      if (intersection(a, b, tolerance)) return false;
+    }
+  }
+  return true;
+}
 export function roomTopologyPasses(options: {
   area: number;
   maximumArea: number;
