@@ -18,3 +18,19 @@ export function explicitRepeatedStoreyHeight(text: string) {
       .sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] || null
   );
 }
+
+export function deriveMetricVolume(baseMetric: number, dimensionsMm: number[]) {
+  if (
+    !Number.isFinite(baseMetric) ||
+    baseMetric <= 0 ||
+    !dimensionsMm.length ||
+    dimensionsMm.some(
+      (dimension) => !Number.isFinite(dimension) || dimension <= 0,
+    )
+  )
+    return null;
+  return dimensionsMm.reduce(
+    (quantity, dimension) => quantity * (dimension / 1000),
+    baseMetric,
+  );
+}

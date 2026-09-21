@@ -13,7 +13,10 @@ import {
   type CalibrationEvidence,
 } from "../../lib/takeoff/calibration";
 import { extractPdfLineSegments } from "../../lib/takeoff/pdfVectors";
-import { explicitRepeatedStoreyHeight } from "../../lib/takeoff/dimensions";
+import {
+  deriveMetricVolume,
+  explicitRepeatedStoreyHeight,
+} from "../../lib/takeoff/dimensions";
 import {
   parseOpeningSchedules,
   reconcileOpening,
@@ -65,7 +68,7 @@ export type EvidenceMarkup = {
   points: { x: number; y: number }[];
   label: string;
   quantity: number;
-  unit: "m²" | "m" | "nr";
+  unit: "m²" | "m" | "m³" | "nr";
 };
 
 export type SourceDocument = { name: string; url: string; revision?: string };
@@ -160,7 +163,14 @@ const metricPolyline = (
     );
   return (length * scale) / 1000;
 };
-const WORK_ITEMS: { label: string; unit: "m²" | "m" | "nr"; rx: RegExp }[] = [
+type WorkItem = {
+  label: string;
+  unit: "m²" | "m" | "m³" | "nr";
+  rx: RegExp;
+  geometry?: "area" | "length" | "count";
+  factors?: string[];
+};
+const WORK_ITEMS: WorkItem[] = [
   {
     label: "Foundation centreline / trench route",
     unit: "m",
@@ -170,6 +180,27 @@ const WORK_ITEMS: { label: string; unit: "m²" | "m" | "nr"; rx: RegExp }[] = [
     label: "Excavation footprint",
     unit: "m²",
     rx: /excavat|earthwork/i,
+  },
+  {
+    label: "Foundation concrete volume",
+    unit: "m³",
+    geometry: "length",
+    factors: ["figured width", "figured depth"],
+    rx: /foundation|footing|concrete/i,
+  },
+  {
+    label: "Trench excavation volume",
+    unit: "m³",
+    geometry: "length",
+    factors: ["figured width", "figured depth"],
+    rx: /excavat|earthwork|trench/i,
+  },
+  {
+    label: "Ground-floor slab volume",
+    unit: "m³",
+    geometry: "area",
+    factors: ["figured thickness"],
+    rx: /ground floor|slab|concrete/i,
   },
   {
     label: "Ground-floor build-up",
@@ -310,7 +341,8 @@ export default function PdfCanvas({
       }[]
     >([]),
     [selectedOpeningTag, setSelectedOpeningTag] = useState("");
-  const [workItem, setWorkItem] = useState(WORK_ITEMS[0].label);
+  const [workItem, setWorkItem] = useState(WORK_ITEMS[0].label),
+    [workFactorIndices, setWorkFactorIndices] = useState<(number | null)[]>([]);
   const manualCalibration = validateCalibration(manualEvidence),
     activeScale = manualCalibration.valid
       ? manualCalibration.mmPerUnit
@@ -1042,26 +1074,51 @@ export default function PdfCanvas({
   };
   const finishWork = () => {
     if (!pageSize || !currentScale) return;
-    const item = WORK_ITEMS.find((x) => x.label === workItem)!;
+    const item = WORK_ITEMS.find((x) => x.label === workItem)!,
+      geometry =
+        item.geometry ||
+        (item.unit === "nr" ? "count" : item.unit === "m" ? "length" : "area"),
+      factorDimensions = (item.factors || []).map((_, index) => {
+        const dimensionIndex = workFactorIndices[index];
+        return dimensionIndex === null || dimensionIndex === undefined
+          ? null
+          : dimensions[dimensionIndex] || null;
+      });
+    if (factorDimensions.some((dimension) => !dimension)) return;
     const valid =
-      item.unit === "nr"
+      geometry === "count"
         ? trace.length > 0
-        : item.unit === "m"
+        : geometry === "length"
           ? trace.length > 1
           : trace.length > 2;
     if (!valid) return;
-    const measured =
-        item.unit === "nr"
+    const baseMeasured =
+        geometry === "count"
           ? trace.length
-          : item.unit === "m"
+          : geometry === "length"
             ? metricPolyline(trace, pageSize, currentScale)
             : metricArea(trace, pageSize, currentScale),
+      measured = factorDimensions.length
+        ? deriveMetricVolume(
+            baseMeasured,
+            factorDimensions.map((dimension) => dimension!.mm),
+          )!
+        : baseMeasured,
       ref = addMarkup("work", trace, item.label, measured, item.unit),
       scope = scopeFor(item.rx),
       specRefs = scope
         .map((s) => `${s.document} P${s.page}`)
         .filter((value, index, all) => all.indexOf(value) === index)
-        .join(", ");
+        .join(", "),
+      factorEvidence = factorDimensions
+        .map(
+          (dimension, index) =>
+            `${item.factors![index]} D${workFactorIndices[index]! + 1} ${dimension!.mm}mm`,
+        )
+        .join(" × "),
+      formula = factorEvidence
+        ? `${baseMeasured.toFixed(3)} ${geometry === "length" ? "m" : "m²"} × ${factorEvidence}`
+        : "";
     onBoq?.({
       id: `${ref}-${item.label.replace(/\W+/g, "-").toUpperCase()}`,
       page,
@@ -1070,10 +1127,10 @@ export default function PdfCanvas({
       unit: item.unit,
       qty: Number(measured.toFixed(2)),
       scope: scope.length
-        ? scope.map((s) => s.text).join(" | ")
-        : "Measured geometry retained; construction build-up/specification remains unresolved.",
+        ? `${scope.map((s) => s.text).join(" | ")}${formula ? ` | Derived volume: ${formula}.` : ""}`
+        : `Measured geometry retained; construction build-up/specification remains unresolved.${formula ? ` Derived volume: ${formula}.` : ""}`,
       sourcePages: scope.map((s) => s.page),
-      evidence: `${evidenceBase(ref)} · ${item.unit === "nr" ? `${trace.length} marked points` : `${trace.length}-vertex ${item.unit === "m" ? "polyline" : "polygon"}`}${specRefs ? ` · specification ${specRefs}` : ""}`,
+      evidence: `${evidenceBase(ref)} · ${geometry === "count" ? `${trace.length} marked points` : `${trace.length}-vertex ${geometry === "length" ? "polyline" : "polygon"}`}${factorEvidence ? ` · ${factorEvidence} · ${formula}` : ""}${specRefs ? ` · specification ${specRefs}` : ""}`,
       markupRef: ref,
       status: "REVIEW",
     });
@@ -1114,8 +1171,21 @@ export default function PdfCanvas({
     setTrace((v) => [...v, p]);
   };
   const shown = markups.filter(
-    (m) => m.page === page && (!m.document || m.document === currentDoc.name),
-  );
+      (m) => m.page === page && (!m.document || m.document === currentDoc.name),
+    ),
+    activeWorkItem = WORK_ITEMS.find((item) => item.label === workItem)!,
+    workGeometry =
+      activeWorkItem.geometry ||
+      (activeWorkItem.unit === "nr"
+        ? "count"
+        : activeWorkItem.unit === "m"
+          ? "length"
+          : "area"),
+    workFactorsReady = (activeWorkItem.factors || []).every(
+      (_, index) =>
+        workFactorIndices[index] !== null &&
+        workFactorIndices[index] !== undefined,
+    );
   return (
     <div className="pdf-workspace">
       <div className="pdf-toolbar">
@@ -1170,7 +1240,14 @@ export default function PdfCanvas({
             </button>
           ),
         )}
-        <select value={workItem} onChange={(e) => setWorkItem(e.target.value)}>
+        <select
+          value={workItem}
+          onChange={(e) => {
+            setWorkItem(e.target.value);
+            setWorkFactorIndices([]);
+            setTrace([]);
+          }}
+        >
           {WORK_ITEMS.map((item) => (
             <option key={item.label} value={item.label}>
               {item.label}
@@ -1241,7 +1318,7 @@ export default function PdfCanvas({
         <svg viewBox="0 0 100 100" preserveAspectRatio="none">
           {shown.map((m) => (
             <g key={m.ref}>
-              {m.unit === "m" ? (
+              {m.unit === "m" || (m.unit === "m³" && m.points.length < 3) ? (
                 <polyline
                   points={m.points.map((p) => `${p.x},${p.y}`).join(" ")}
                   className={`markup ${m.kind} ${focusMarkup === m.ref ? "focused" : ""}`}
@@ -1367,6 +1444,27 @@ export default function PdfCanvas({
             ))}
           </select>
         )}
+        {activeWorkItem.factors?.map((factor, factorIndex) => (
+          <select
+            key={factor}
+            value={workFactorIndices[factorIndex] ?? ""}
+            onChange={(event) =>
+              setWorkFactorIndices((value) => {
+                const next = [...value];
+                next[factorIndex] =
+                  event.target.value === "" ? null : Number(event.target.value);
+                return next;
+              })
+            }
+          >
+            <option value="">{factor} · select drawing dimension</option>
+            {dimensions.slice(0, 80).map((dimension, index) => (
+              <option key={`${factor}-${index}`} value={index}>
+                D{index + 1} · {dimension.mm}mm · P{page}
+              </option>
+            ))}
+          </select>
+        ))}
         {tool === "room" && selectedRoom && quantity > 0 && (
           <button onClick={buildRoom}>BUILD EVIDENCE-LINKED ROOM BOQ</button>
         )}
@@ -1385,10 +1483,15 @@ export default function PdfCanvas({
           <button onClick={finishGifa}>SAVE EXTERNAL-FACE GIFA</button>
         )}
         {(["area", "length", "count"] as Tool[]).includes(tool) &&
-          ((tool === "count" && trace.length > 0) ||
-            (tool === "length" && trace.length > 1) ||
-            (tool === "area" && quantity > 0)) && (
-            <button onClick={finishWork}>ADD MEASURED WORK TO BOQ</button>
+          tool === workGeometry &&
+          workFactorsReady &&
+          ((workGeometry === "count" && trace.length > 0) ||
+            (workGeometry === "length" && trace.length > 1) ||
+            (workGeometry === "area" && quantity > 0)) && (
+            <button onClick={finishWork}>
+              ADD MEASURED {activeWorkItem.unit === "m³" ? "VOLUME" : "WORK"} TO
+              BOQ
+            </button>
           )}
         <span>
           {schedule.length} schedule openings indexed · {scopeLines.length}{" "}
