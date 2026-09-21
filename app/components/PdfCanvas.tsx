@@ -42,6 +42,7 @@ import {
   polygonPerimeter,
   selectExternalFace,
   selectRoomPolygon,
+  simplifyPolygon,
   type Segment,
   type TopologyPolygon,
 } from "../../lib/takeoff/topology";
@@ -335,7 +336,8 @@ export default function PdfCanvas({
     [page, setPage] = useState(1),
     [pages, setPages] = useState(0),
     [pageKind, setPageKind] = useState<PageKind>("OTHER"),
-    [renderedKey, setRenderedKey] = useState("");
+    [renderedKey, setRenderedKey] = useState(""),
+    [pdfReadyKey, setPdfReadyKey] = useState("");
   const [sheetHits, setSheetHits] = useState<Hit[]>([]),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -408,6 +410,8 @@ export default function PdfCanvas({
       if (!currentDoc) return;
       setBusy(true);
       setError("");
+      setPdfReadyKey("");
+      pdfRef.current = null;
       try {
         const pdfjs = await import("pdfjs-dist");
         pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -551,6 +555,7 @@ export default function PdfCanvas({
         }
         if (cancelled) return;
         pdfRef.current = activePdf;
+        setPdfReadyKey(`${docIndex}:${currentDoc.url}`);
         setPages(activePdf.numPages);
         setSheetHits(activeHits);
         setSchedule(openings);
@@ -572,7 +577,7 @@ export default function PdfCanvas({
     let cancelled = false;
     (async () => {
       const pdf = pdfRef.current;
-      if (!pdf) return;
+      if (!pdf || pdfReadyKey !== `${docIndex}:${currentDoc?.url}`) return;
       setBusy(true);
       setRenderedKey("");
       try {
@@ -631,12 +636,13 @@ export default function PdfCanvas({
         setDimensions(dims);
         setHeightMm(explicitRepeatedStoreyHeight(text));
         const host = canvas.current?.closest(".drawing-viewport"),
+          availableWidth = Math.max(
+            280,
+            (host as HTMLElement | null)?.clientWidth || window.innerWidth - 16,
+          ),
           baseRenderScale = Math.max(
-            0.2,
-            Math.min(
-              2,
-              ((host as HTMLElement | null)?.clientWidth || 900) / base.width,
-            ),
+            0.1,
+            Math.min(2, availableWidth / base.width),
           ),
           renderScale = baseRenderScale * zoom,
           vp = pg.getViewport({ scale: renderScale }),
@@ -717,7 +723,7 @@ export default function PdfCanvas({
     return () => {
       cancelled = true;
     };
-  }, [page, currentDoc?.url, zoom]);
+  }, [page, currentDoc?.url, zoom, pdfReadyKey, docIndex]);
   useEffect(() => {
     setFacadeGross(null);
     setOpeningAreas([]);
@@ -810,8 +816,10 @@ export default function PdfCanvas({
       ),
       maxGapX = (maximumOpeningMm / (pageSize.w * currentScale)) * 100,
       maxGapY = (maximumOpeningMm / (pageSize.h * currentScale)) * 100,
-      styled = vectors.filter((v) => /width=(18|24);/.test(v.source || "")),
-      sourceVectors = styled.length > 40 ? styled : vectors,
+      styled = vectors.filter((v) =>
+        /stroke=#(?:000000|808080|545454);/.test(v.source || ""),
+      ),
+      sourceVectors = styled.length > 200 ? styled : vectors,
       axis = sourceVectors
         .map(
           (v) =>
@@ -838,16 +846,15 @@ export default function PdfCanvas({
       ),
       polygon = selectRoomPolygon(faces, room, { minArea: 0.2, maxArea: 1000 });
     if (!polygon) return null;
-    const enclosedLabels = labels.filter((label) =>
-        pointInPolygon(label, polygon.points),
-      ),
+    const points = simplifyPolygon(polygon.points, 0.12),
+      enclosedLabels = labels.filter((label) => pointInPolygon(label, points)),
       openPlanPair =
         enclosedLabels.length === 2 &&
         enclosedLabels.every((label) => /kitchen|dining/i.test(label.text)),
-      area = metricArea(polygon.points, pageSize, currentScale),
-      perimeter = metricPerimeter(polygon.points, pageSize, currentScale),
+      area = metricArea(points, pageSize, currentScale),
+      perimeter = metricPerimeter(points, pageSize, currentScale),
       compactness = area > 0 ? (perimeter * perimeter) / area : Infinity,
-      supportedVertices = polygon.points.filter((point) =>
+      supportedVertices = points.filter((point) =>
         snapPointToVectors(point, vectors, 0.25),
       ).length,
       maximumArea = /bath|shower|ensuite|en-suite|\bwc\b|cloakroom/i.test(
@@ -864,13 +871,13 @@ export default function PdfCanvas({
     if (
       area < 2.5 ||
       area > maximumArea ||
-      polygon.points.length > 16 ||
+      points.length > 16 ||
       compactness > 45 ||
-      supportedVertices / polygon.points.length < 0.8 ||
+      supportedVertices / points.length < 0.8 ||
       (enclosedLabels.length > 1 && !openPlanPair)
     )
       return null;
-    return polygon.points;
+    return points;
   };
   const runTopology = (room: Label) => {
     if (readOnly) return;
@@ -1634,6 +1641,9 @@ export default function PdfCanvas({
             if (dx > 0 && page > 1) setPage((v) => v - 1);
           }}
         >
+          {busy && renderedKey !== `${docIndex}:${page}` && (
+            <div className="drawing-loading">Rendering drawing…</div>
+          )}
           <canvas ref={canvas} />
           <svg viewBox="0 0 100 100" preserveAspectRatio="none">
             {shown.map((m) => (

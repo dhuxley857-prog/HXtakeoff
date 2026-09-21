@@ -6,8 +6,10 @@ import {
   netFacadeArea,
   netPerimeter,
   netWallArea,
+  polygonArea,
   selectExternalFace,
   selectRoomPolygon,
+  simplifyPolygon,
   type Segment,
   type TopologyPolygon,
 } from "./topology.ts";
@@ -32,6 +34,21 @@ test("closed topology measures an L-shaped room", () => {
   assert.ok(room);
   assert.equal(room.area, 21);
   assert.equal(room.perimeter, 22);
+});
+test("polygon simplification removes CAD collinear nodes but retains an L shape", () => {
+  const detailed = [
+    { x: 0, y: 0 },
+    { x: 3, y: 0.02 },
+    { x: 6, y: 0 },
+    { x: 6, y: 2 },
+    { x: 3, y: 2 },
+    { x: 3, y: 5 },
+    { x: 0, y: 5 },
+    { x: 0.01, y: 2.5 },
+  ];
+  const simplified = simplifyPolygon(detailed, 0.05);
+  assert.equal(simplified.length, 6);
+  assert.ok(Math.abs(polygonArea(simplified) - 21) < 0.1);
 });
 test("small endpoint gaps snap closed", () => {
   const segments: Segment[] = [

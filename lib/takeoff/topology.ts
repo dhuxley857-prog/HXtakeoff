@@ -34,6 +34,44 @@ export function polygonPerimeter(points: Point[]) {
   }
   return n;
 }
+export function simplifyPolygon(points: Point[], tolerance = 0.1) {
+  if (points.length <= 3) return [...points];
+  let simplified = [...points],
+    changed = true;
+  while (changed && simplified.length > 3) {
+    changed = false;
+    const next: Point[] = [];
+    for (let i = 0; i < simplified.length; i++) {
+      const previous =
+          simplified[(i - 1 + simplified.length) % simplified.length],
+        point = simplified[i],
+        following = simplified[(i + 1) % simplified.length],
+        dx = following.x - previous.x,
+        dy = following.y - previous.y,
+        length = Math.hypot(dx, dy),
+        distance =
+          length > 0
+            ? Math.abs(
+                dy * point.x -
+                  dx * point.y +
+                  following.x * previous.y -
+                  following.y * previous.x,
+              ) / length
+            : Math.hypot(point.x - previous.x, point.y - previous.y),
+        between =
+          (point.x - previous.x) * (point.x - following.x) +
+            (point.y - previous.y) * (point.y - following.y) <=
+          tolerance * tolerance;
+      if (distance <= tolerance && between) {
+        changed = true;
+        continue;
+      }
+      next.push(point);
+    }
+    simplified = next.length >= 3 ? next : simplified;
+  }
+  return simplified;
+}
 export function pointInPolygon(point: Point, polygon: Point[]) {
   let inside = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {

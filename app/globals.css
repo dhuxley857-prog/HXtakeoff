@@ -646,6 +646,18 @@ button {
   max-width: none;
   height: auto;
 }
+.drawing-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  background: #f7f8f9;
+  color: #44515a;
+  font-size: 12px;
+  font-weight: 800;
+}
 .drawing-stage > svg {
   position: absolute;
   inset: 0;
@@ -1028,7 +1040,8 @@ td small {
   }
   .drawing-stage {
     margin: 8px 0;
-    width: 100%;
+    width: fit-content;
+    min-width: 100%;
   }
   .drawing-stage canvas {
     max-width: none;
