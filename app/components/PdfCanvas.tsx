@@ -816,8 +816,14 @@ export default function PdfCanvas({
   const candidateForRoom = (room: Label) => {
     if (!pageSize || !currentScale) return null;
     const maximumOpeningMm = Math.min(
-        1500,
-        Math.max(1200, ...schedule.map((opening) => opening.widthMm || 0)),
+        2400,
+        Math.max(
+          1200,
+          ...schedule.map((opening) => opening.widthMm || 0),
+          ...dimensions
+            .filter((dimension) => dimension.mm >= 600 && dimension.mm <= 2400)
+            .map((dimension) => dimension.mm),
+        ),
       ),
       maxGapX = (maximumOpeningMm / (pageSize.w * currentScale)) * 100,
       maxGapY = (maximumOpeningMm / (pageSize.h * currentScale)) * 100,
@@ -1194,7 +1200,14 @@ export default function PdfCanvas({
         snapPointToVectors(point, vectors, 0.25),
       ).length;
       return supported / candidate.polygon.points.length >= 0.8
-        ? [{ floor, candidate, labelCount: floorLabels.length }]
+        ? [
+            {
+              floor,
+              candidate,
+              labelCount: floorLabels.length,
+              closureMm: maximumOpeningMm,
+            },
+          ]
         : [];
     });
   };
@@ -1248,14 +1261,16 @@ export default function PdfCanvas({
       );
       return;
     }
-    const retained = candidates.flatMap(({ floor, candidate, labelCount }) => {
-      const ref = emitGifa(
-        candidate.polygon.points,
-        `automatic external-face closed topology · ${candidate.enclosedLabels.length}/${labelCount} ${floor.toLowerCase()} room labels enclosed · CAD branch spurs removed without changing enclosed area`,
-        floor,
-      );
-      return ref ? [ref] : [];
-    });
+    const retained = candidates.flatMap(
+      ({ floor, candidate, labelCount, closureMm }) => {
+        const ref = emitGifa(
+          candidate.polygon.points,
+          `automatic external-face closed topology · ${candidate.enclosedLabels.length}/${labelCount} ${floor.toLowerCase()} room labels enclosed · collinear opening closure limited by sheet figure ${closureMm}mm · CAD branch spurs removed without changing enclosed area`,
+          floor,
+        );
+        return ref ? [ref] : [];
+      },
+    );
     if (retained.length)
       setTopologyNote(
         `${retained.join(", ")} retained as review-only external-face GIFA candidates for ${retained.length} floor${retained.length === 1 ? "" : "s"}.`,
