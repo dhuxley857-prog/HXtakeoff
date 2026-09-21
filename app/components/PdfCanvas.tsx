@@ -17,6 +17,7 @@ import { explicitRepeatedStoreyHeight } from "../../lib/takeoff/dimensions";
 import {
   parseOpeningSchedules,
   reconcileOpening,
+  roomsMatch,
   rowsFromPositionedText,
   type OpeningScheduleRow,
 } from "../../lib/takeoff/schedules";
@@ -682,12 +683,6 @@ export default function PdfCanvas({
     );
     setTool("room");
   };
-  const roomMatch = (scheduleRoom: string, room: string) =>
-    scheduleRoom
-      .toLowerCase()
-      .replace(/bed\s+(\d+)/, "bedroom $1")
-      .replace("master bed", "master bedroom")
-      .includes(room.toLowerCase());
   const emitRoomBoq = (
     room: Label,
     points: { x: number; y: number }[],
@@ -696,7 +691,7 @@ export default function PdfCanvas({
     if (!pageSize || !currentScale || points.length < 3) return;
     const area = metricArea(points, pageSize, currentScale),
       perimeter = metricPerimeter(points, pageSize, currentScale),
-      roomRows = schedule.filter((r) => roomMatch(r.room, room.text)),
+      roomRows = schedule.filter((r) => roomsMatch(r.room, room.text)),
       doors = roomRows.filter((r) => r.kind === "door"),
       windows = roomRows.filter((r) => r.kind === "window"),
       openings = [

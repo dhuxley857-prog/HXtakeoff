@@ -78,3 +78,21 @@ export function reconcileOpening(tag: string, rows: OpeningScheduleRow[]) {
   const normal = tag.toUpperCase().replace(/\s+/g, "");
   return rows.find((r) => r.tag === normal) || null;
 }
+
+export function roomsMatch(a: string, b: string) {
+  const normalize = (value: string) =>
+      value
+        .toLowerCase()
+        .replace(/master\s*bed(?:room)?/, "master bedroom")
+        .replace(/\bbed\s*(\d+)\b/, "bedroom $1")
+        .replace(/\bensuite\s*(\d+)\b/, "ensuite $1")
+        .replace(/[^a-z0-9]+/g, "")
+        .trim(),
+    left = normalize(a),
+    right = normalize(b);
+  return (
+    !!left &&
+    !!right &&
+    (left === right || left.includes(right) || right.includes(left))
+  );
+}
