@@ -351,6 +351,11 @@ export default function Home() {
               (after.elevationLabels || []).join(",")
             )
               kinds.push("elevation identifiers");
+            if (
+              (before.specificationSystems || []).join(",") !==
+              (after.specificationSystems || []).join(",")
+            )
+              kinds.push("construction systems");
             if (before.clauseFingerprint !== after.clauseFingerprint)
               kinds.push("specification clauses");
             return kinds.length ? [`P${page}: ${kinds.join(", ")}`] : [];

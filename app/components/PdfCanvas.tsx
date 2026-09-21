@@ -14,6 +14,11 @@ import {
 } from "../../lib/takeoff/calibration";
 import { extractPdfLineSegments } from "../../lib/takeoff/pdfVectors";
 import {
+  classifySpecificationClause,
+  formatSpecificationRef,
+  type SpecificationClause,
+} from "../../lib/takeoff/specifications";
+import {
   deriveMetricVolume,
   explicitRepeatedStoreyHeight,
 } from "../../lib/takeoff/dimensions";
@@ -86,6 +91,7 @@ export type PackManifest = {
       openingRefs: string[];
       roomLabels: string[];
       elevationLabels: string[];
+      specificationSystems: string[];
       clauseFingerprint: string;
     }[];
   }[];
@@ -311,9 +317,7 @@ export default function PdfCanvas({
     [doorRefs, setDoorRefs] = useState<Label[]>([]),
     [windowRefs, setWindowRefs] = useState<Label[]>([]);
   const [schedule, setSchedule] = useState<OpeningScheduleRow[]>([]),
-    [scopeLines, setScopeLines] = useState<
-      { document: string; page: number; text: string }[]
-    >([]);
+    [scopeLines, setScopeLines] = useState<SpecificationClause[]>([]);
   const [autoScale, setAutoScale] = useState<number | null>(null),
     [autoCalibration, setAutoCalibration] = useState<ReturnType<
       typeof validateCalibration
@@ -369,7 +373,7 @@ export default function PdfCanvas({
           import.meta.url,
         ).toString();
         const openings: OpeningScheduleRow[] = [],
-          scopes: { document: string; page: number; text: string }[] = [],
+          scopes: SpecificationClause[] = [],
           manifests: PackManifest["documents"] = [];
         let activeHits: Hit[] = [],
           activePdf: any = null;
@@ -428,14 +432,17 @@ export default function PdfCanvas({
                   ).map((value) => value.replace(/\s+/g, " ").toUpperCase()),
                 ),
               ).sort(),
-              clauses = normalized
+              clauseTexts = normalized
                 .split(/(?<=[.;:])\s+/)
                 .filter((s) =>
-                  /(brick|stone|render|cladding|wall|partition|floor|ceiling|skirting|tile|roof|insulation|drain|rainwater|heating|plumbing|electrical)/i.test(
+                  /(foundation|footing|substructure|excavat|groundwork|brick|stone|render|cladding|wall|partition|plasterboard|floor|ceiling|skirting|tile|roof|insulation|window|door|glazing|ironmongery|drain|rainwater|heating|plumbing|ventilation|electrical|lighting)/i.test(
                     s,
                   ),
-                )
-                .join("|");
+                ),
+              clauses = clauseTexts.join("|"),
+              structuredClauses = clauseTexts.map((clause) =>
+                classifySpecificationClause(clause, source.name, n),
+              );
             sheets.push({
               page: n,
               kind,
@@ -445,6 +452,9 @@ export default function PdfCanvas({
               openingRefs,
               roomLabels,
               elevationLabels,
+              specificationSystems: Array.from(
+                new Set(structuredClauses.map((clause) => clause.system)),
+              ).sort(),
               clauseFingerprint: hash(clauses),
             });
             if (kind !== "OTHER") hits.push({ page: n, kind, title });
@@ -454,24 +464,12 @@ export default function PdfCanvas({
                   (row) => ({ ...row, document: source.name }),
                 ),
               );
-            text
-              .split(/(?<=[.;:])\s+/)
+            structuredClauses
               .filter(
-                (s) =>
-                  /(brick|stone|render|cladding|wall|partition|floor|ceiling|skirting|tile|roof|insulation|drain|rainwater|heating|plumbing|electrical)/i.test(
-                    s,
-                  ) &&
-                  s.length > 14 &&
-                  s.length < 320,
+                (clause) => clause.text.length > 14 && clause.text.length < 320,
               )
               .slice(0, 20)
-              .forEach((s) =>
-                scopes.push({
-                  document: source.name,
-                  page: n,
-                  text: s.trim(),
-                }),
-              );
+              .forEach((clause) => scopes.push(clause));
           }
           manifests.push({
             name: source.name,
@@ -783,7 +781,7 @@ export default function PdfCanvas({
       base = evidenceBase(ref),
       scope = scopeFor(/floor|tile|timber|vinyl|carpet/i),
       specRefs = scope
-        .map((s) => `${s.document} P${s.page}`)
+        .map(formatSpecificationRef)
         .filter((value, index, all) => all.indexOf(value) === index)
         .join(", "),
       scheduleRefs = roomRows
@@ -1010,7 +1008,7 @@ export default function PdfCanvas({
         .at(-1),
       scope = scopeFor(/brick|stone|render|cladding|external wall/i),
       specRefs = scope
-        .map((s) => `${s.document} P${s.page}`)
+        .map(formatSpecificationRef)
         .filter((value, index, all) => all.indexOf(value) === index)
         .join(", "),
       ref =
@@ -1107,7 +1105,7 @@ export default function PdfCanvas({
       ref = addMarkup("work", trace, item.label, measured, item.unit),
       scope = scopeFor(item.rx),
       specRefs = scope
-        .map((s) => `${s.document} P${s.page}`)
+        .map(formatSpecificationRef)
         .filter((value, index, all) => all.indexOf(value) === index)
         .join(", "),
       factorEvidence = factorDimensions
