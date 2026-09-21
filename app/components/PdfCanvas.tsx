@@ -92,6 +92,7 @@ export type PackManifest = {
       roomLabels: string[];
       elevationLabels: string[];
       specificationSystems: string[];
+      openingScheduleFingerprint: string;
       clauseFingerprint: string;
     }[];
   }[];
@@ -454,7 +455,13 @@ export default function PdfCanvas({
               clauses = clauseTexts.join("|"),
               structuredClauses = clauseTexts.map((clause) =>
                 classifySpecificationClause(clause, source.name, n),
-              );
+              ),
+              pageOpeningRows =
+                kind === "SCHEDULE"
+                  ? parseOpeningSchedules(rowsFromPositionedText(items), n).map(
+                      (row) => ({ ...row, document: source.name }),
+                    )
+                  : [];
             sheets.push({
               page: n,
               kind,
@@ -467,17 +474,22 @@ export default function PdfCanvas({
               specificationSystems: Array.from(
                 new Set(structuredClauses.map((clause) => clause.system)),
               ).sort(),
+              openingScheduleFingerprint: hash(
+                JSON.stringify(
+                  pageOpeningRows.map((row) => ({
+                    tag: row.tag,
+                    widthMm: row.widthMm,
+                    heightMm: row.heightMm,
+                    room: row.room,
+                  })),
+                ),
+              ),
               clauseFingerprint: hash(clauses),
             });
             if (kind !== "OTHER") hits.push({ page: n, kind, title });
             if (kind === "PLAN")
               indexedPlanPages.push({ documentIndex: d, page: n });
-            if (kind === "SCHEDULE")
-              openings.push(
-                ...parseOpeningSchedules(rowsFromPositionedText(items), n).map(
-                  (row) => ({ ...row, document: source.name }),
-                ),
-              );
+            openings.push(...pageOpeningRows);
             structuredClauses
               .filter(
                 (clause) => clause.text.length > 14 && clause.text.length < 320,

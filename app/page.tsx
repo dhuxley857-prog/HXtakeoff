@@ -342,6 +342,11 @@ export default function Home() {
             if (before.openingRefs.join(",") !== after.openingRefs.join(","))
               kinds.push("door/window schedule refs");
             if (
+              before.openingScheduleFingerprint !==
+              after.openingScheduleFingerprint
+            )
+              kinds.push("opening schedule dimensions/rooms");
+            if (
               (before.roomLabels || []).join(",") !==
               (after.roomLabels || []).join(",")
             )
