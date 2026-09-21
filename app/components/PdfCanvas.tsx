@@ -59,6 +59,7 @@ type Tool =
   | "count";
 export type EvidenceMarkup = {
   ref: string;
+  document?: string;
   page: number;
   kind: "room" | "facade" | "opening" | "gifa" | "work";
   points: { x: number; y: number }[];
@@ -317,8 +318,10 @@ export default function PdfCanvas({
 
   useEffect(() => {
     if (!focusMarkup) return;
-    const m = focusMarkup.match(/^[A-Z]+(\d{2})-/);
-    if (m) setPage(Number(m[1]));
+    const documentMatch = focusMarkup.match(/^D(\d+)-/),
+      pageMatch = focusMarkup.match(/P(\d{2})-/);
+    if (documentMatch) setDocIndex(Number(documentMatch[1]) - 1);
+    if (pageMatch) setPage(Number(pageMatch[1]));
   }, [focusMarkup]);
   useEffect(() => {
     let cancelled = false;
@@ -627,10 +630,19 @@ export default function PdfCanvas({
               : kind === "gifa"
                 ? "G"
                 : "M",
-      ref = `P${String(page).padStart(2, "0")}-${prefix}${String(markups.filter((m) => m.page === page && m.kind === kind).length + 1).padStart(2, "0")}`;
+      ref = `${docs.length > 1 ? `D${docIndex + 1}-` : ""}P${String(page).padStart(2, "0")}-${prefix}${String(markups.filter((m) => m.page === page && m.kind === kind && (!m.document || m.document === currentDoc.name)).length + 1).padStart(2, "0")}`;
     setMarkups((v) => [
       ...v,
-      { ref, page, kind, points, label, quantity: q, unit },
+      {
+        ref,
+        document: currentDoc.name,
+        page,
+        kind,
+        points,
+        label,
+        quantity: q,
+        unit,
+      },
     ]);
     return ref;
   };
@@ -832,14 +844,23 @@ export default function PdfCanvas({
     if (readOnly || !pageSize || !currentScale) return;
     const existing = new Set(
         markups
-          .filter((markup) => markup.page === page && markup.kind === "room")
+          .filter(
+            (markup) =>
+              markup.page === page &&
+              markup.kind === "room" &&
+              (!markup.document || markup.document === currentDoc.name),
+          )
           .map((markup) => markup.label.toLowerCase()),
       ),
       seenPolygons = new Set<string>(),
       additions: EvidenceMarkup[] = [];
     let next =
-      markups.filter((markup) => markup.page === page && markup.kind === "room")
-        .length + 1;
+      markups.filter(
+        (markup) =>
+          markup.page === page &&
+          markup.kind === "room" &&
+          (!markup.document || markup.document === currentDoc.name),
+      ).length + 1;
     for (const room of labels) {
       if (existing.has(room.text.toLowerCase())) continue;
       const points = candidateForRoom(room);
@@ -851,9 +872,10 @@ export default function PdfCanvas({
       if (seenPolygons.has(polygonKey)) continue;
       seenPolygons.add(polygonKey);
       const area = metricArea(points, pageSize, currentScale),
-        ref = `P${String(page).padStart(2, "0")}-A${String(next++).padStart(2, "0")}`;
+        ref = `${docs.length > 1 ? `D${docIndex + 1}-` : ""}P${String(page).padStart(2, "0")}-A${String(next++).padStart(2, "0")}`;
       additions.push({
         ref,
+        document: currentDoc.name,
         page,
         kind: "room",
         points,
@@ -936,14 +958,21 @@ export default function PdfCanvas({
         })),
       ),
       facade = markups
-        .filter((m) => m.page === page && m.kind === "facade")
+        .filter(
+          (m) =>
+            m.page === page &&
+            m.kind === "facade" &&
+            (!m.document || m.document === currentDoc.name),
+        )
         .at(-1),
       scope = scopeFor(/brick|stone|render|cladding|external wall/i),
       specRefs = scope
         .map((s) => `${s.document} P${s.page}`)
         .filter((value, index, all) => all.indexOf(value) === index)
         .join(", "),
-      ref = facade?.ref || `P${String(page).padStart(2, "0")}-F01`;
+      ref =
+        facade?.ref ||
+        `${docs.length > 1 ? `D${docIndex + 1}-` : ""}P${String(page).padStart(2, "0")}-F01`;
     [
       {
         id: `${ref}-GROSS`,
@@ -1072,7 +1101,9 @@ export default function PdfCanvas({
     }
     setTrace((v) => [...v, p]);
   };
-  const shown = markups.filter((m) => m.page === page);
+  const shown = markups.filter(
+    (m) => m.page === page && (!m.document || m.document === currentDoc.name),
+  );
   return (
     <div className="pdf-workspace">
       <div className="pdf-toolbar">

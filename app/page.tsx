@@ -206,18 +206,34 @@ export default function Home() {
     const windows = next.openingRows.filter((r) => r.kind === "window"),
       doors = next.openingRows.filter((r) => r.kind === "door"),
       scheduled = new Set(next.openingRows.map((r) => r.tag)),
-      planDoorTags = Array.from(
-        new Set(
-          next.documents.flatMap((d) =>
-            d.sheets
-              .filter((s) => s.kind === "PLAN")
-              .flatMap((s) =>
-                s.openingRefs.filter((tag) => tag.startsWith("D")),
-              ),
+      planDoorEntries = next.documents.flatMap((document, documentIndex) =>
+        document.sheets
+          .filter((sheet) => sheet.kind === "PLAN")
+          .flatMap((sheet) =>
+            sheet.openingRefs
+              .filter((tag) => tag.startsWith("D"))
+              .map((tag) => ({
+                tag,
+                document: document.name,
+                documentIndex,
+                page: sheet.page,
+              })),
           ),
-        ),
       ),
-      externalCandidates = planDoorTags.filter((tag) => !scheduled.has(tag));
+      externalCandidates = planDoorEntries.filter(
+        (entry, index, all) =>
+          !scheduled.has(entry.tag) &&
+          all.findIndex((candidate) => candidate.tag === entry.tag) === index,
+      ),
+      qualifiedRef = (
+        row: (typeof next.openingRows)[number],
+        suffix: string,
+      ) => {
+        const documentIndex = next.documents.findIndex(
+          (document) => document.name === row.document,
+        );
+        return `${next.documents.length > 1 && documentIndex >= 0 ? `D${documentIndex + 1}-` : ""}P${String(row.page).padStart(2, "0")}-${suffix}`;
+      };
     if (windows.length)
       mergeBoq({
         id: "PACK-WINDOW-SCHEDULE",
@@ -228,8 +244,8 @@ export default function Home() {
         qty: windows.length,
         scope: `${windows.length} unique scheduled window types/instances indexed with opening sizes and room associations.`,
         sourcePages: [...new Set(windows.map((r) => r.page))],
-        evidence: `P${String(windows[0].page).padStart(2, "0")}-S01 · ${windows[0].document || "Schedule"} P${windows[0].page} · window schedule rows ${windows.map((r) => `${r.tag} → ${r.room}`).join(", ")}`,
-        markupRef: `P${String(windows[0].page).padStart(2, "0")}-S01`,
+        evidence: `${qualifiedRef(windows[0], "S01")} · ${windows[0].document || "Schedule"} P${windows[0].page} · window schedule rows ${windows.map((r) => `${r.tag} → ${r.room}`).join(", ")}`,
+        markupRef: qualifiedRef(windows[0], "S01"),
         status: "REVIEW",
       });
     if (doors.length)
@@ -242,29 +258,31 @@ export default function Home() {
         qty: doors.length,
         scope: `${doors.length} scheduled doors indexed with leaf widths, room and wall type.`,
         sourcePages: [...new Set(doors.map((r) => r.page))],
-        evidence: `P${String(doors[0].page).padStart(2, "0")}-S02 · ${doors[0].document || "Schedule"} P${doors[0].page} · door schedule rows ${doors.map((r) => `${r.tag} → ${r.room}`).join(", ")}`,
-        markupRef: `P${String(doors[0].page).padStart(2, "0")}-S02`,
+        evidence: `${qualifiedRef(doors[0], "S02")} · ${doors[0].document || "Schedule"} P${doors[0].page} · door schedule rows ${doors.map((r) => `${r.tag} → ${r.room}`).join(", ")}`,
+        markupRef: qualifiedRef(doors[0], "S02"),
         status: "REVIEW",
       });
     if (externalCandidates.length)
       mergeBoq({
         id: "PACK-EXTERNAL-DOOR-TAGS",
-        page: 3,
+        page: externalCandidates[0].page,
         room: "External envelope",
         item: "External door tags requiring elevation reconciliation",
         unit: "nr",
         qty: externalCandidates.length,
         scope:
           "Explicit plan door tags not present in the internal door schedule; retain for elevation and external-door schedule review.",
-        evidence: `P03-S03 · plan tag index ${externalCandidates.join(", ")} · schedule exception`,
-        markupRef: "P03-S03",
+        evidence: `${next.documents.length > 1 ? `D${externalCandidates[0].documentIndex + 1}-` : ""}P${String(externalCandidates[0].page).padStart(2, "0")}-S03 · plan tag index ${externalCandidates.map((entry) => `${entry.tag} → ${entry.document} P${entry.page}`).join(", ")} · schedule exception`,
+        markupRef: `${next.documents.length > 1 ? `D${externalCandidates[0].documentIndex + 1}-` : ""}P${String(externalCandidates[0].page).padStart(2, "0")}-S03`,
         status: "REVIEW",
       });
   };
   const changed = (row: BoqDraft) => {
     const b = baseline?.boq[row.id],
       markupRef =
-        row.markupRef || row.evidence.match(/\bP\d{2}-[A-Z]\d{2}\b/)?.[0] || "",
+        row.markupRef ||
+        row.evidence.match(/\b(?:D\d+-)?P\d{2}-[A-Z]\d{2}\b/)?.[0] ||
+        "",
       beforeMarkup = baseline?.markups?.find(
         (markup) => markup.ref === markupRef,
       ),
@@ -375,7 +393,9 @@ export default function Home() {
       : "",
   ].filter(Boolean);
   const ref = (r: BoqDraft) =>
-    r.markupRef || r.evidence.match(/\bP\d{2}-[A-Z]\d{2}\b/)?.[0] || "";
+    r.markupRef ||
+    r.evidence.match(/\b(?:D\d+-)?P\d{2}-[A-Z]\d{2}\b/)?.[0] ||
+    "";
   const lock = () => {
     if (baseline || acceptanceIssues.length) return;
     setLockedRev(revision);
@@ -508,7 +528,7 @@ export default function Home() {
       const before = baseline.boq[row.id],
         markupRef =
           row.markupRef ||
-          row.evidence.match(/\bP\d{2}-[A-Z]\d{2}\b/)?.[0] ||
+          row.evidence.match(/\b(?:D\d+-)?P\d{2}-[A-Z]\d{2}\b/)?.[0] ||
           "",
         beforeMarkup = baseline.markups?.find(
           (markup) => markup.ref === markupRef,
