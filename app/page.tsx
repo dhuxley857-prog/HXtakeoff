@@ -60,17 +60,13 @@ const seed: BoqDraft[] = register.map(([id, room, item, unit]) => ({
 }));
 const TEST_SOURCES: SourceDocument[] = [
   {
-    name: "ChurchWoods 100% Construction Drawing Set · 93 sheets",
+    name: "52 Adley Street · UK single-dwelling Building Regulations pack · 9 sheets",
     url: "/api/test001?file=drawings",
-    revision: "100% Construction Documents · 27 May 2016",
-  },
-  {
-    name: "ChurchWoods Addendum 3 · specification clarifications",
-    url: "/api/test001?file=addendum-3",
-    revision: "Addendum 3 · 27 June 2016",
+    revision:
+      "Existing + proposed plans, elevations, sections, details and specification · 3 April 2023",
   },
 ];
-const CHECKPOINT_KEY = "hx-takeoff-test001-churchwoods-v1";
+const CHECKPOINT_KEY = "hx-takeoff-test001-adley-street-v1";
 type Baseline = {
   boq: Record<
     string,
@@ -734,7 +730,9 @@ export default function Home() {
         </div>
         <div>
           <strong>TEST 001</strong>
-          <span>ChurchWoods · 100% coordinated construction documents</span>
+          <span>
+            52 Adley Street · UK single-dwelling Building Regulations pack
+          </span>
         </div>
         <em>DH</em>
       </header>

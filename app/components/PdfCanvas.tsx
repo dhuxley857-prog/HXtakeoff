@@ -309,7 +309,7 @@ export default function PdfCanvas({
       sources?.length
         ? sources
         : url
-          ? [{ name: "ChurchWoods 100% Construction Drawing Set", url }]
+          ? [{ name: "52 Adley Street Building Regulations pack", url }]
           : [],
     [sources, url],
   );

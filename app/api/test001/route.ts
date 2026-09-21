@@ -2,12 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 const SOURCES = {
   drawings: {
-    url: "https://charlestownri.gov/vertical/sites/%7BDF68A5B8-A4F3-47A1-AE87-B411E21C6E1C%7D/uploads/16_0601_CHW_Full_CD_Set.pdf",
-    filename: "HX-Test-001-ChurchWoods-100-Percent-CD-Drawings.pdf",
-  },
-  "addendum-3": {
-    url: "https://charlestownri.gov/vertical/sites/%7BDF68A5B8-A4F3-47A1-AE87-B411E21C6E1C%7D/uploads/CHURCH_WOODS_-_16_0627_CHW_Addendum_3.pdf",
-    filename: "HX-Test-001-ChurchWoods-Addendum-3.pdf",
+    url: "https://planning-by-design.co.uk/wp-content/uploads/2023/06/Example-Building-Regulations-Drawings.pdf",
+    filename: "HX-Test-001-52-Adley-Street-Building-Regulations.pdf",
   },
 } as const;
 
