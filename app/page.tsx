@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FileText, LockKeyhole, Upload } from "lucide-react";
 import { roomsMatch } from "../lib/takeoff/schedules";
+import { loadRevisionPack, saveRevisionPack } from "../lib/takeoff/packStore";
 import PdfCanvas, {
   type BoqDraft,
   type EvidenceMarkup,
@@ -134,11 +135,26 @@ export default function Home() {
         if (Number.isFinite(state.revision)) setRevision(state.revision);
         if (state.lockedRev === null || Number.isFinite(state.lockedRev))
           setLockedRev(state.lockedRev);
-        if (state.baseline) setBaseline(state.baseline);
+        if (state.baseline) {
+          setBaseline(state.baseline);
+          if (Number.isFinite(state.baseline.revision))
+            void loadRevisionPack(state.baseline.revision).then(
+              (storedSources) => {
+                if (storedSources.length)
+                  setBaseline((value) =>
+                    value ? { ...value, sources: storedSources } : value,
+                  );
+              },
+            );
+        }
         if (state.gifaByFloor) setGifaByFloor(state.gifaByFloor);
         if (state.approved) setApproved(state.approved);
         if (state.rates) setRates(state.rates);
         if (Array.isArray(state.markups)) setMarkups(state.markups);
+        if (Number.isFinite(state.revision))
+          void loadRevisionPack(state.revision).then((storedSources) => {
+            if (storedSources.length) setSources(storedSources);
+          });
       }
     } catch {
       // A corrupt local checkpoint must never create or alter quantities.
@@ -467,10 +483,9 @@ export default function Home() {
     setMarkups([]);
     setView("revision");
   };
-  const upload = (files: File[]) => {
-    sources
-      .filter((s) => s.url.startsWith("blob:"))
-      .forEach((s) => URL.revokeObjectURL(s.url));
+  const upload = async (files: File[]) => {
+    if (!files.length) return;
+    await saveRevisionPack(files, revision);
     setSources(
       files.map((f) => ({
         name: f.name,
@@ -718,7 +733,7 @@ export default function Home() {
                 type="file"
                 accept="application/pdf"
                 multiple
-                onChange={(e) => upload(Array.from(e.target.files || []))}
+                onChange={(e) => void upload(Array.from(e.target.files || []))}
               />
             </label>
             <div className="pack-list">
