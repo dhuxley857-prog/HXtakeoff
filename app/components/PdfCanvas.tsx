@@ -306,7 +306,8 @@ export default function PdfCanvas({
   const [docIndex, setDocIndex] = useState(0),
     [page, setPage] = useState(1),
     [pages, setPages] = useState(0),
-    [pageKind, setPageKind] = useState<PageKind>("OTHER");
+    [pageKind, setPageKind] = useState<PageKind>("OTHER"),
+    [renderedKey, setRenderedKey] = useState("");
   const [sheetHits, setSheetHits] = useState<Hit[]>([]),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -347,11 +348,21 @@ export default function PdfCanvas({
     [selectedOpeningTag, setSelectedOpeningTag] = useState("");
   const [workItem, setWorkItem] = useState(WORK_ITEMS[0].label),
     [workFactorIndices, setWorkFactorIndices] = useState<(number | null)[]>([]);
-  const manualCalibration = validateCalibration(manualEvidence),
+  const [planPages, setPlanPages] = useState<
+      { documentIndex: number; page: number }[]
+    >([]),
+    [autoPlanQueue, setAutoPlanQueue] = useState<
+      { documentIndex: number; page: number }[]
+    >([]);
+  const currentDoc = docs[docIndex],
+    pageManualEvidence = manualEvidence.filter(
+      (evidence) =>
+        evidence.page === page && evidence.drawing === currentDoc?.name,
+    ),
+    manualCalibration = validateCalibration(pageManualEvidence),
     activeScale = manualCalibration.valid
       ? manualCalibration.mmPerUnit
-      : autoScale,
-    currentDoc = docs[docIndex];
+      : autoScale;
 
   useEffect(() => {
     if (!focusMarkup) return;
@@ -374,7 +385,8 @@ export default function PdfCanvas({
         ).toString();
         const openings: OpeningScheduleRow[] = [],
           scopes: SpecificationClause[] = [],
-          manifests: PackManifest["documents"] = [];
+          manifests: PackManifest["documents"] = [],
+          indexedPlanPages: { documentIndex: number; page: number }[] = [];
         let activeHits: Hit[] = [],
           activePdf: any = null;
         for (let d = 0; d < docs.length; d++) {
@@ -458,6 +470,8 @@ export default function PdfCanvas({
               clauseFingerprint: hash(clauses),
             });
             if (kind !== "OTHER") hits.push({ page: n, kind, title });
+            if (kind === "PLAN")
+              indexedPlanPages.push({ documentIndex: d, page: n });
             if (kind === "SCHEDULE")
               openings.push(
                 ...parseOpeningSchedules(rowsFromPositionedText(items), n).map(
@@ -488,6 +502,7 @@ export default function PdfCanvas({
         setSheetHits(activeHits);
         setSchedule(openings);
         setScopeLines(scopes);
+        setPlanPages(indexedPlanPages);
         onManifest?.({ documents: manifests, openingRows: openings });
         setPage(activeHits.find((h) => h.kind === "PLAN")?.page || 1);
       } catch (e: any) {
@@ -506,6 +521,7 @@ export default function PdfCanvas({
       const pdf = pdfRef.current;
       if (!pdf) return;
       setBusy(true);
+      setRenderedKey("");
       try {
         const pdfjs = await import("pdfjs-dist"),
           pg = await pdf.getPage(page),
@@ -623,6 +639,7 @@ export default function PdfCanvas({
           setAutoCalibration(null);
           setAutoScale(null);
         }
+        setRenderedKey(`${docIndex}:${page}`);
       } catch (e: any) {
         setError(e?.message || "Could not render drawing");
       } finally {
@@ -935,6 +952,47 @@ export default function PdfCanvas({
     setTool("inspect");
     setTrace([]);
   };
+  const startAutoPlanPack = () => {
+    if (readOnly || !planPages.length) return;
+    const queue = [...planPages],
+      first = queue[0];
+    setAutoPlanQueue(queue);
+    if (docIndex !== first.documentIndex || page !== first.page)
+      setRenderedKey("");
+    setDocIndex(first.documentIndex);
+    setPage(first.page);
+    setTopologyNote(
+      `Plan-pack run started · ${queue.length} identified plan sheet(s).`,
+    );
+  };
+  useEffect(() => {
+    const target = autoPlanQueue[0];
+    if (!target || busy) return;
+    if (docIndex !== target.documentIndex || page !== target.page) {
+      setRenderedKey("");
+      setDocIndex(target.documentIndex);
+      setPage(target.page);
+      return;
+    }
+    if (renderedKey !== `${target.documentIndex}:${target.page}`) return;
+    if (activeScale) autoMeasureRooms();
+    else
+      setTopologyNote(
+        `D${target.documentIndex + 1} P${target.page} skipped · no independently validated sheet calibration.`,
+      );
+    const remaining = autoPlanQueue.slice(1);
+    setAutoPlanQueue(remaining);
+    if (remaining.length) {
+      setRenderedKey("");
+      setDocIndex(remaining[0].documentIndex);
+      setPage(remaining[0].page);
+    } else
+      setTopologyNote(
+        "Plan-pack room topology run complete. Review every retained markup; skipped or rejected rooms remain explicitly unresolved.",
+      );
+    // This effect advances only when a newly rendered queue target is ready.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPlanQueue, renderedKey, busy, activeScale, docIndex, page]);
   const finishFacade = () => {
     if (!pageSize || !currentScale || trace.length < 3) return;
     if (tool === "facade") {
@@ -1223,6 +1281,15 @@ export default function PdfCanvas({
         >
           AUTO ROOMS
         </button>
+        <button
+          disabled={readOnly || !planPages.length || autoPlanQueue.length > 0}
+          onClick={startAutoPlanPack}
+          title="Visit every identified plan and retain only independently calibrated closed room faces"
+        >
+          {autoPlanQueue.length
+            ? `PLAN PACK ${planPages.length - autoPlanQueue.length + 1}/${planPages.length}`
+            : "AUTO PLAN PACK"}
+        </button>
         {(["inspect", "room", "facade", "opening", "gifa"] as Tool[]).map(
           (t) => (
             <button
@@ -1293,7 +1360,9 @@ export default function PdfCanvas({
             </option>
           ))}
         </select>
-        <span>{manualEvidence.length} manual evidence line(s)</span>
+        <span>
+          {pageManualEvidence.length} sheet-specific manual evidence line(s)
+        </span>
         {busy && <span>Reading drawing…</span>}
       </div>
       {topologyNote && <div className="topology-note">{topologyNote}</div>}
