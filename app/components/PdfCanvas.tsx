@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import {
   validateCalibration,
   type CalibrationEvidence,
@@ -48,7 +55,7 @@ type Tool =
   | "area"
   | "length"
   | "count";
-type Markup = {
+export type EvidenceMarkup = {
   ref: string;
   page: number;
   kind: "room" | "facade" | "opening" | "gifa" | "work";
@@ -193,6 +200,8 @@ export default function PdfCanvas({
   onGifa,
   focusMarkup,
   readOnly = false,
+  markups: controlledMarkups,
+  onMarkups,
 }: {
   url?: string;
   sources?: SourceDocument[];
@@ -201,6 +210,8 @@ export default function PdfCanvas({
   onGifa?: (floor: string, area: number, evidence: string) => void;
   focusMarkup?: string;
   readOnly?: boolean;
+  markups?: EvidenceMarkup[];
+  onMarkups?: Dispatch<SetStateAction<EvidenceMarkup[]>>;
 }) {
   const docs = useMemo(
     () =>
@@ -242,8 +253,10 @@ export default function PdfCanvas({
     [trace, setTrace] = useState<{ x: number; y: number }[]>([]);
   const [selectedRoom, setSelectedRoom] = useState<Label | null>(null),
     [heightMm, setHeightMm] = useState<number | null>(null),
-    [markups, setMarkups] = useState<Markup[]>([]),
     [topologyNote, setTopologyNote] = useState("");
+  const [localMarkups, setLocalMarkups] = useState<EvidenceMarkup[]>([]),
+    markups = controlledMarkups ?? localMarkups,
+    setMarkups = onMarkups ?? setLocalMarkups;
   const [facadeGross, setFacadeGross] = useState<number | null>(null),
     [openingAreas, setOpeningAreas] = useState<
       {
@@ -557,11 +570,11 @@ export default function PdfCanvas({
   const scopeFor = (rx: RegExp) =>
     scopeLines.filter((s) => rx.test(s.text)).slice(0, 3);
   const addMarkup = (
-    kind: Markup["kind"],
+    kind: EvidenceMarkup["kind"],
     points: { x: number; y: number }[],
     label: string,
     q: number,
-    unit: Markup["unit"] = "m²",
+    unit: EvidenceMarkup["unit"] = "m²",
   ) => {
     const prefix =
         kind === "room"
@@ -788,7 +801,7 @@ export default function PdfCanvas({
           .map((markup) => markup.label.toLowerCase()),
       ),
       seenPolygons = new Set<string>(),
-      additions: Markup[] = [];
+      additions: EvidenceMarkup[] = [];
     let next =
       markups.filter((markup) => markup.page === page && markup.kind === "room")
         .length + 1;

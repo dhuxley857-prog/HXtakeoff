@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { FileText, LockKeyhole, Upload } from "lucide-react";
 import PdfCanvas, {
   type BoqDraft,
+  type EvidenceMarkup,
   type PackManifest,
   type SourceDocument,
 } from "./components/PdfCanvas";
@@ -73,6 +74,8 @@ type Baseline = {
   rates?: Record<string, number>;
   revision?: number;
   lockedAt?: string;
+  markups?: EvidenceMarkup[];
+  sources?: SourceDocument[];
 };
 const nrmElements = [
   "Facilitating works",
@@ -109,7 +112,8 @@ export default function Home() {
     [search, setSearch] = useState(""),
     [changesOnly, setChangesOnly] = useState(false),
     [gifaByFloor, setGifaByFloor] = useState<Record<string, number>>({}),
-    [rates, setRates] = useState<Record<string, number>>({});
+    [rates, setRates] = useState<Record<string, number>>({}),
+    [markups, setMarkups] = useState<EvidenceMarkup[]>([]);
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     try {
@@ -124,6 +128,7 @@ export default function Home() {
         if (state.gifaByFloor) setGifaByFloor(state.gifaByFloor);
         if (state.approved) setApproved(state.approved);
         if (state.rates) setRates(state.rates);
+        if (Array.isArray(state.markups)) setMarkups(state.markups);
       }
     } catch {
       // A corrupt local checkpoint must never create or alter quantities.
@@ -143,6 +148,7 @@ export default function Home() {
         gifaByFloor,
         approved,
         rates,
+        markups,
       }),
     );
   }, [
@@ -154,6 +160,7 @@ export default function Home() {
     gifaByFloor,
     approved,
     rates,
+    markups,
   ]);
   const mergeBoq = (row: BoqDraft) =>
     setBoq((v) =>
@@ -330,12 +337,15 @@ export default function Home() {
       rates: { ...rates },
       revision,
       lockedAt: new Date().toISOString(),
+      markups: [...markups],
+      sources: sources.map((source) => ({ ...source })),
     });
   };
   const newRevision = () => {
     if (!lockedRev) return;
     setRevision((v) => v + 1);
     setApproved({});
+    setMarkups([]);
     setView("revision");
   };
   const upload = (files: File[]) => {
@@ -621,6 +631,8 @@ export default function Home() {
               }
               focusMarkup={focusMarkup}
               readOnly={lockedRev === revision}
+              markups={markups}
+              onMarkups={setMarkups}
             />
           </div>
           <aside className="review-panel">
@@ -879,6 +891,36 @@ export default function Home() {
                 : "NO LOCKED BASELINE"}
             </strong>
           </div>
+          {baseline?.sources?.length ? (
+            <div className="revision-drawings">
+              <article>
+                <h3>LOCKED REV {lockedRev}</h3>
+                <PdfCanvas
+                  sources={baseline.sources}
+                  readOnly
+                  markups={baseline.markups || []}
+                  focusMarkup={focusMarkup}
+                />
+              </article>
+              <article>
+                <h3>CURRENT REV {revision}</h3>
+                <PdfCanvas
+                  sources={sources}
+                  readOnly
+                  markups={markups}
+                  focusMarkup={focusMarkup}
+                />
+              </article>
+            </div>
+          ) : (
+            baseline && (
+              <p className="revision-source-warning">
+                The locked quantities and manifest remain available, but the
+                original uploaded PDF blob is no longer present in this browser
+                session.
+              </p>
+            )
+          )}
           <div className="revision-columns">
             <article>
               <h3>DOCUMENT CHANGES</h3>
