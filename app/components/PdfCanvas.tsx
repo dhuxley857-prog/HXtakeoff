@@ -21,6 +21,7 @@ import {
 import {
   deriveMetricVolume,
   explicitRepeatedStoreyHeight,
+  parseFiguredDimensionMm,
 } from "../../lib/takeoff/dimensions";
 import {
   parseOpeningSchedules,
@@ -117,7 +118,8 @@ const ROOM =
   /^(sitting room|living room|living|kitchen(?:\s*\/\s*dining)?|kitchen|dining room|dining|hall|bedroom(?:\s+\d+)?|master bedroom|bathroom|bath|wc|utility(?: room)?|study|garage|landing|ensuite|store)$/i;
 const DOOR = /^(d\s*\d+[a-z]?|door\s*\d+[a-z]?)$/i;
 const WINDOW = /^(w\s*\d+[a-z]?|window\s*\d+[a-z]?)$/i;
-const DIM = /^(?:\d{3,5}|\d{3,5}\s*mm)$/i;
+const DIM =
+  /^(?:\d{3,5}(?:\s*mm)?|\d+\s*[’']\s*-?\s*\d*(?:\s+\d+\s*\/\s*\d+)?\s*[“”"]?)$/i;
 const hash = (text: string) => {
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) {
@@ -298,7 +300,7 @@ export default function PdfCanvas({
       sources?.length
         ? sources
         : url
-          ? [{ name: "DH415BB-3 Construction Drawing Pack", url }]
+          ? [{ name: "ChurchWoods 100% Construction Drawing Set", url }]
           : [],
     [sources, url],
   );
@@ -578,8 +580,11 @@ export default function PdfCanvas({
         setDoorRefs(positioned(DOOR));
         setWindowRefs(positioned(WINDOW));
         const dims = positioned(DIM)
-          .map((x) => ({ ...x, mm: Number(x.text.replace(/\D/g, "")) }))
-          .filter((x) => x.mm >= 300 && x.mm <= 30000);
+          .map((x) => ({ ...x, mm: parseFiguredDimensionMm(x.text) }))
+          .filter(
+            (x): x is Label & { mm: number } =>
+              x.mm !== null && x.mm >= 300 && x.mm <= 30000,
+          );
         setDimensions(dims);
         setHeightMm(explicitRepeatedStoreyHeight(text));
         const host = canvas.current?.parentElement,

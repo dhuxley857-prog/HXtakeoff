@@ -58,6 +58,19 @@ const seed: BoqDraft[] = register.map(([id, room, item, unit]) => ({
   evidence: "TEST 001 · evidence pending · no quantity assumed",
   status: "UNMEASURED",
 }));
+const TEST_SOURCES: SourceDocument[] = [
+  {
+    name: "ChurchWoods 100% Construction Drawing Set · 93 sheets",
+    url: "/api/test001?file=drawings",
+    revision: "100% Construction Documents · 27 May 2016",
+  },
+  {
+    name: "ChurchWoods Addendum 3 · specification clarifications",
+    url: "/api/test001?file=addendum-3",
+    revision: "Addendum 3 · 27 June 2016",
+  },
+];
+const CHECKPOINT_KEY = "hx-takeoff-test001-churchwoods-v1";
 type Baseline = {
   boq: Record<
     string,
@@ -107,13 +120,7 @@ export default function Home() {
       "drawing",
     ),
     [boq, setBoq] = useState<BoqDraft[]>(seed),
-    [sources, setSources] = useState<SourceDocument[]>([
-      {
-        name: "DH415BB-3 Construction Drawing Pack",
-        url: "/api/test001",
-        revision: "Construction Issue",
-      },
-    ]);
+    [sources, setSources] = useState<SourceDocument[]>(TEST_SOURCES);
   const [manifest, setManifest] = useState<PackManifest | null>(null),
     [revision, setRevision] = useState(1),
     [lockedRev, setLockedRev] = useState<number | null>(null),
@@ -128,7 +135,7 @@ export default function Home() {
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("hx-takeoff-test001");
+      const saved = localStorage.getItem(CHECKPOINT_KEY);
       if (saved) {
         const state = JSON.parse(saved);
         if (Array.isArray(state.boq)) setBoq(state.boq);
@@ -165,7 +172,7 @@ export default function Home() {
   useEffect(() => {
     if (!hydrated) return;
     localStorage.setItem(
-      "hx-takeoff-test001",
+      CHECKPOINT_KEY,
       JSON.stringify({
         boq,
         revision,
@@ -727,7 +734,7 @@ export default function Home() {
         </div>
         <div>
           <strong>TEST 001</strong>
-          <span>DH415BB-3 · coordinated construction take-off</span>
+          <span>ChurchWoods · 100% coordinated construction documents</span>
         </div>
         <em>DH</em>
       </header>
@@ -772,13 +779,7 @@ export default function Home() {
             <button
               className="primary"
               onClick={() => {
-                setSources([
-                  {
-                    name: "DH415BB-3 Construction Drawing Pack",
-                    url: "/api/test001",
-                    revision: "Construction Issue",
-                  },
-                ]);
+                setSources(TEST_SOURCES.map((source) => ({ ...source })));
                 setManifest(null);
               }}
             >

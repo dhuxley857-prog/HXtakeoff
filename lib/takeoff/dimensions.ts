@@ -34,3 +34,25 @@ export function deriveMetricVolume(baseMetric: number, dimensionsMm: number[]) {
     baseMetric,
   );
 }
+
+export function parseFiguredDimensionMm(value: string) {
+  const normalized = value
+    .trim()
+    .replace(/[’‘]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/\s+/g, " ");
+  const metric = normalized.match(/^(\d{3,5})(?:\s*mm)?$/i);
+  if (metric) return Number(metric[1]);
+  const imperial = normalized.match(
+    /^(\d+)\s*'\s*-?\s*(\d+)?(?:\s+(\d+)\s*\/\s*(\d+))?\s*"?$/,
+  );
+  if (!imperial) return null;
+  const feet = Number(imperial[1]),
+    inches = Number(imperial[2] || 0),
+    numerator = Number(imperial[3] || 0),
+    denominator = Number(imperial[4] || 1);
+  if (inches >= 12 || denominator <= 0 || numerator >= denominator) return null;
+  return Number(
+    ((feet * 12 + inches + numerator / denominator) * 25.4).toFixed(3),
+  );
+}
