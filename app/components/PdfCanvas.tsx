@@ -265,7 +265,7 @@ export default function PdfCanvas({
       typeof validateCalibration
     > | null>(null),
     [manualEvidence, setManualEvidence] = useState<CalibrationEvidence[]>([]);
-  const [selectedDim, setSelectedDim] = useState<number | null>(null),
+  const [selectedDimIndex, setSelectedDimIndex] = useState<number | null>(null),
     [calPts, setCalPts] = useState<{ x: number; y: number }[]>([]),
     [tool, setTool] = useState<Tool>("inspect"),
     [trace, setTrace] = useState<{ x: number; y: number }[]>([]);
@@ -1022,24 +1022,27 @@ export default function PdfCanvas({
         x: ((e.clientX - r.left) / r.width) * 100,
         y: ((e.clientY - r.top) / r.height) * 100,
       };
-    if (tool === "calibrate" && selectedDim) {
+    const selectedDimension =
+      selectedDimIndex === null ? null : dimensions[selectedDimIndex];
+    if (tool === "calibrate" && selectedDimension) {
       const next = [...calPts, p];
       setCalPts(next);
       if (next.length === 2 && pageSize) {
         const a = px(next[0], pageSize),
-          b = px(next[1], pageSize);
+          b = px(next[1], pageSize),
+          evidenceId = `P${page}-D${selectedDimIndex! + 1}-${selectedDimension.mm}`;
         setManualEvidence((v) => [
-          ...v.filter((x) => x.id !== `P${page}-${selectedDim}`),
+          ...v.filter((x) => x.id !== evidenceId),
           {
-            id: `P${page}-${selectedDim}`,
-            figuredMm: selectedDim,
+            id: evidenceId,
+            figuredMm: selectedDimension.mm,
             drawnLength: Math.hypot(b.x - a.x, b.y - a.y),
             page,
             drawing: currentDoc.name,
           },
         ]);
         setCalPts([]);
-        setSelectedDim(null);
+        setSelectedDimIndex(null);
       }
       return;
     }
@@ -1132,17 +1135,19 @@ export default function PdfCanvas({
         </span>
         {activeScale && <span>{activeScale.toFixed(3)} mm/PDF pt</span>}
         <select
-          value={selectedDim || ""}
+          value={selectedDimIndex ?? ""}
           onChange={(e) => {
-            setSelectedDim(Number(e.target.value) || null);
+            setSelectedDimIndex(
+              e.target.value === "" ? null : Number(e.target.value),
+            );
             setTool("calibrate");
             setCalPts([]);
           }}
         >
           <option value="">Manual check · choose dimension</option>
           {dimensions.slice(0, 50).map((d, i) => (
-            <option key={i} value={d.mm}>
-              {d.mm}mm · P{page}
+            <option key={i} value={i}>
+              D{i + 1} · {d.mm}mm · P{page}
             </option>
           ))}
         </select>
