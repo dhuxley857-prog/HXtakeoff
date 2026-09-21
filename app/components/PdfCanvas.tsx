@@ -569,16 +569,8 @@ export default function PdfCanvas({
   };
   const evidenceBase = (ref: string) =>
     `${ref} · ${currentDoc.name} · P${page} · ${manualCalibration.valid ? "two-point reviewed calibration" : `${autoCalibration?.accepted.length || 0} independently agreeing figured dimensions`} · ${currentScale.toFixed(3)} mm/PDF pt`;
-  const runTopology = (room: Label) => {
-    if (readOnly) return;
-    setSelectedRoom(room);
-    setTrace([]);
-    if (!pageSize || !currentScale) {
-      setTopologyNote(
-        "Calibration must be validated before topology can produce a metric quantity.",
-      );
-      return;
-    }
+  const candidateForRoom = (room: Label) => {
+    if (!pageSize || !currentScale) return null;
     const styled = vectors.filter((v) => /width=(18|24);/.test(v.source || "")),
       sourceVectors = styled.length > 40 ? styled : vectors,
       axis = sourceVectors
@@ -602,13 +594,7 @@ export default function PdfCanvas({
         { snapTolerance: 0.12, minArea: 0.04, maxArea: 1200 },
       ),
       polygon = selectRoomPolygon(faces, room, { minArea: 0.2, maxArea: 1000 });
-    if (!polygon) {
-      setTopologyNote(
-        "No defensible closed face found. Trace the room boundary; HX will not substitute a rectangle.",
-      );
-      setTool("room");
-      return;
-    }
+    if (!polygon) return null;
     const enclosedLabels = labels.filter((label) =>
         pointInPolygon(label, polygon.points),
       ),
@@ -624,16 +610,31 @@ export default function PdfCanvas({
       polygon.points.length > 16 ||
       compactness > 45 ||
       (enclosedLabels.length > 1 && !openPlanPair)
-    ) {
+    )
+      return null;
+    return polygon.points;
+  };
+  const runTopology = (room: Label) => {
+    if (readOnly) return;
+    setSelectedRoom(room);
+    setTrace([]);
+    if (!pageSize || !currentScale) {
       setTopologyNote(
-        "Topology candidate failed the room area/shape sanity gates and remains unmeasured. Trace the visible wall face for review.",
+        "Calibration must be validated before topology can produce a metric quantity.",
+      );
+      return;
+    }
+    const points = candidateForRoom(room);
+    if (!points) {
+      setTopologyNote(
+        "No defensible closed face passed the room area/shape gates. Trace the visible wall face; HX will not substitute a rectangle.",
       );
       setTool("room");
       return;
     }
-    setTrace(polygon.points);
+    setTrace(points);
     setTopologyNote(
-      `${polygon.points.length}-vertex closed face found. Review the highlighted topology before adding quantities.`,
+      `${points.length}-vertex closed face found. Review the highlighted topology before adding quantities.`,
     );
     setTool("room");
   };
@@ -643,17 +644,15 @@ export default function PdfCanvas({
       .replace(/bed\s+(\d+)/, "bedroom $1")
       .replace("master bed", "master bedroom")
       .includes(room.toLowerCase());
-  const buildRoom = () => {
-    if (
-      !selectedRoom ||
-      !pageSize ||
-      !currentScale ||
-      trace.length < 3 ||
-      quantity <= 0
-    )
-      return;
-    const ref = addMarkup("room", trace, selectedRoom.text, quantity),
-      roomRows = schedule.filter((r) => roomMatch(r.room, selectedRoom.text)),
+  const emitRoomBoq = (
+    room: Label,
+    points: { x: number; y: number }[],
+    ref: string,
+  ) => {
+    if (!pageSize || !currentScale || points.length < 3) return;
+    const area = metricArea(points, pageSize, currentScale),
+      perimeter = metricPerimeter(points, pageSize, currentScale),
+      roomRows = schedule.filter((r) => roomMatch(r.room, room.text)),
       doors = roomRows.filter((r) => r.kind === "door"),
       windows = roomRows.filter((r) => r.kind === "window"),
       openings = [
@@ -678,25 +677,25 @@ export default function PdfCanvas({
         {
           id: `${ref}-FLOOR`,
           page,
-          room: selectedRoom.text,
+          room: room.text,
           item: "Floor area / finish",
           unit: "m²",
-          qty: Number(quantity.toFixed(2)),
+          qty: Number(area.toFixed(2)),
           scope: scope.length
             ? scope.map((s) => s.text).join(" | ")
             : "Measured floor area; finish specification not explicitly resolved.",
           sourcePages: scope.map((s) => s.page),
-          evidence: `${base} · closed ${trace.length}-vertex topology${specRefs ? ` · specification ${specRefs}` : ""}`,
+          evidence: `${base} · closed ${points.length}-vertex topology${specRefs ? ` · specification ${specRefs}` : ""}`,
           markupRef: ref,
           status: "REVIEW",
         },
         {
           id: `${ref}-CEILING`,
           page,
-          room: selectedRoom.text,
+          room: room.text,
           item: "Ceiling area / finish",
           unit: "m²",
-          qty: Number(quantity.toFixed(2)),
+          qty: Number(area.toFixed(2)),
           scope:
             "Ceiling plan footprint matched to reviewed room topology; finish requires specification review.",
           evidence: `${base} · same horizontal room topology`,
@@ -706,16 +705,16 @@ export default function PdfCanvas({
         {
           id: `${ref}-SKIRT`,
           page,
-          room: selectedRoom.text,
+          room: room.text,
           item: "Skirting net of scheduled door openings",
           unit: "m",
           qty: Number(
             netPerimeter(
-              tracePerimeter,
+              perimeter,
               doors.map((d) => d.widthMm / 1000),
             ).toFixed(2),
           ),
-          scope: `Gross perimeter ${tracePerimeter.toFixed(2)} m less scheduled openings: ${doors.map((d) => `${d.tag} ${d.widthMm}mm`).join(", ") || "none resolved"}.`,
+          scope: `Gross perimeter ${perimeter.toFixed(2)} m less scheduled openings: ${doors.map((d) => `${d.tag} ${d.widthMm}mm`).join(", ") || "none resolved"}.`,
           sourcePages: [...new Set(doors.map((d) => d.page))],
           evidence: `${base} · schedule deductions${scheduleRefs ? ` · ${scheduleRefs}` : " · no matched schedule rows"}`,
           markupRef: ref,
@@ -726,11 +725,11 @@ export default function PdfCanvas({
       rows.push({
         id: `${ref}-WALL`,
         page,
-        room: selectedRoom.text,
+        room: room.text,
         item: "Internal wall finish / decoration net of openings",
         unit: "m²",
         qty: Number(
-          netWallArea(tracePerimeter, heightMm / 1000, openings).toFixed(2),
+          netWallArea(perimeter, heightMm / 1000, openings).toFixed(2),
         ),
         scope: `Perimeter × independently repeated ${heightMm}mm height less ${doors.length} door and ${windows.length} window schedule opening(s).`,
         sourcePages: [...new Set(roomRows.map((r) => r.page))],
@@ -742,7 +741,7 @@ export default function PdfCanvas({
       rows.push({
         id: `${ref}-WALL`,
         page,
-        room: selectedRoom.text,
+        room: room.text,
         item: "Internal wall finish / decoration",
         unit: "m²",
         qty: 0,
@@ -753,6 +752,62 @@ export default function PdfCanvas({
         status: "UNMEASURED",
       });
     rows.forEach((r) => onBoq?.(r));
+  };
+  const buildRoom = () => {
+    if (
+      !selectedRoom ||
+      !pageSize ||
+      !currentScale ||
+      trace.length < 3 ||
+      quantity <= 0
+    )
+      return;
+    const ref = addMarkup("room", trace, selectedRoom.text, quantity);
+    emitRoomBoq(selectedRoom, trace, ref);
+    setTool("inspect");
+    setTrace([]);
+  };
+  const autoMeasureRooms = () => {
+    if (readOnly || !pageSize || !currentScale) return;
+    const existing = new Set(
+        markups
+          .filter((markup) => markup.page === page && markup.kind === "room")
+          .map((markup) => markup.label.toLowerCase()),
+      ),
+      seenPolygons = new Set<string>(),
+      additions: Markup[] = [];
+    let next =
+      markups.filter((markup) => markup.page === page && markup.kind === "room")
+        .length + 1;
+    for (const room of labels) {
+      if (existing.has(room.text.toLowerCase())) continue;
+      const points = candidateForRoom(room);
+      if (!points) continue;
+      const polygonKey = points
+        .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
+        .sort()
+        .join("|");
+      if (seenPolygons.has(polygonKey)) continue;
+      seenPolygons.add(polygonKey);
+      const area = metricArea(points, pageSize, currentScale),
+        ref = `P${String(page).padStart(2, "0")}-A${String(next++).padStart(2, "0")}`;
+      additions.push({
+        ref,
+        page,
+        kind: "room",
+        points,
+        label: room.text,
+        quantity: area,
+        unit: "m²",
+      });
+      emitRoomBoq(room, points, ref);
+    }
+    if (additions.length) setMarkups((value) => [...value, ...additions]);
+    setTopologyNote(
+      additions.length
+        ? `${additions.length} room topolog${additions.length === 1 ? "y" : "ies"} passed calibration, closure, area, shape and label-isolation gates. Review each BOQ line before approval.`
+        : "No additional room topology passed every evidence gate. Unsupported rooms remain unmeasured for manual tracing.",
+    );
     setTool("inspect");
     setTrace([]);
   };
@@ -942,6 +997,13 @@ export default function PdfCanvas({
             </option>
           ))}
         </select>
+        <button
+          disabled={readOnly || pageKind !== "PLAN" || !activeScale}
+          onClick={autoMeasureRooms}
+          title="Batch only closed CAD faces that pass calibration and room sanity gates"
+        >
+          AUTO ROOMS
+        </button>
         {(["inspect", "room", "facade", "opening", "gifa"] as Tool[]).map(
           (t) => (
             <button
