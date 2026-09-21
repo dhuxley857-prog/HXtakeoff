@@ -72,6 +72,24 @@ export function simplifyPolygon(points: Point[], tolerance = 0.1) {
   }
   return simplified;
 }
+export function roomTopologyPasses(options: {
+  area: number;
+  maximumArea: number;
+  vertices: number;
+  compactness: number;
+  supportedVertexRatio: number;
+  enclosedLabels: number;
+  openPlanPair: boolean;
+}) {
+  return (
+    options.area >= 2.5 &&
+    options.area <= options.maximumArea &&
+    options.vertices <= 16 &&
+    options.compactness <= 55 &&
+    options.supportedVertexRatio >= 0.8 &&
+    (options.enclosedLabels <= 1 || options.openPlanPair)
+  );
+}
 export function pointInPolygon(point: Point, polygon: Point[]) {
   let inside = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {

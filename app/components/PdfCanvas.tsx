@@ -40,6 +40,7 @@ import {
   pointInPolygon,
   polygonArea,
   polygonPerimeter,
+  roomTopologyPasses,
   selectExternalFace,
   selectRoomPolygon,
   simplifyPolygon,
@@ -869,12 +870,15 @@ export default function PdfCanvas({
               ? 70
               : 100;
     if (
-      area < 2.5 ||
-      area > maximumArea ||
-      points.length > 16 ||
-      compactness > 45 ||
-      supportedVertices / points.length < 0.8 ||
-      (enclosedLabels.length > 1 && !openPlanPair)
+      !roomTopologyPasses({
+        area,
+        maximumArea,
+        vertices: points.length,
+        compactness,
+        supportedVertexRatio: supportedVertices / points.length,
+        enclosedLabels: enclosedLabels.length,
+        openPlanPair,
+      })
     )
       return null;
     return points;

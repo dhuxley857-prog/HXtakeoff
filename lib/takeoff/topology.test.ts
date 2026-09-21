@@ -7,6 +7,7 @@ import {
   netPerimeter,
   netWallArea,
   polygonArea,
+  roomTopologyPasses,
   selectExternalFace,
   selectRoomPolygon,
   simplifyPolygon,
@@ -49,6 +50,32 @@ test("polygon simplification removes CAD collinear nodes but retains an L shape"
   const simplified = simplifyPolygon(detailed, 0.05);
   assert.equal(simplified.length, 6);
   assert.ok(Math.abs(polygonArea(simplified) - 21) < 0.1);
+});
+test("room topology gate accepts a supported L-shaped room but rejects complex faces", () => {
+  assert.equal(
+    roomTopologyPasses({
+      area: 12.76,
+      maximumArea: 40,
+      vertices: 15,
+      compactness: 49.1,
+      supportedVertexRatio: 1,
+      enclosedLabels: 1,
+      openPlanPair: false,
+    }),
+    true,
+  );
+  assert.equal(
+    roomTopologyPasses({
+      area: 4.48,
+      maximumArea: 25,
+      vertices: 38,
+      compactness: 136.3,
+      supportedVertexRatio: 1,
+      enclosedLabels: 1,
+      openPlanPair: false,
+    }),
+    false,
+  );
 });
 test("small endpoint gaps snap closed", () => {
   const segments: Segment[] = [
