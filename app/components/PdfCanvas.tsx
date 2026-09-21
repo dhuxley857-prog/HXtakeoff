@@ -82,6 +82,7 @@ export type PackManifest = {
       dimensions: number[];
       openingRefs: string[];
       roomLabels: string[];
+      elevationLabels: string[];
       clauseFingerprint: string;
     }[];
   }[];
@@ -386,6 +387,15 @@ export default function PdfCanvas({
                     .map((value) => value.replace(/\s+/g, " ")),
                 ),
               ).sort(),
+              elevationLabels = Array.from(
+                new Set(
+                  (
+                    normalized.match(
+                      /\b(?:front|rear|left\s+side|right\s+side|side)\s+elevation\b/gi,
+                    ) || []
+                  ).map((value) => value.replace(/\s+/g, " ").toUpperCase()),
+                ),
+              ).sort(),
               clauses = normalized
                 .split(/(?<=[.;:])\s+/)
                 .filter((s) =>
@@ -402,6 +412,7 @@ export default function PdfCanvas({
               dimensions: sheetDimensions,
               openingRefs,
               roomLabels,
+              elevationLabels,
               clauseFingerprint: hash(clauses),
             });
             if (kind !== "OTHER") hits.push({ page: n, kind, title });
@@ -1008,8 +1019,9 @@ export default function PdfCanvas({
   };
   const finishGifa = () => {
     if (!pageSize || !currentScale || trace.length < 3) return;
-    const floor =
+    const floorTitle =
         sheetHits.find((h) => h.page === page)?.title || `Floor P${page}`,
+      floor = `${docs.length > 1 ? `${currentDoc.name} · ` : ""}${floorTitle}`,
       ref = addMarkup("gifa", trace, `${floor} external face`, quantity);
     onGifa?.(floor, Number(quantity.toFixed(2)), evidenceBase(ref));
     onBoq?.({

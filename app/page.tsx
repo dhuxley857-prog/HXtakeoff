@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { FileText, LockKeyhole, Upload } from "lucide-react";
+import { roomsMatch } from "../lib/takeoff/schedules";
 import PdfCanvas, {
   type BoqDraft,
   type EvidenceMarkup,
@@ -329,6 +330,11 @@ export default function Home() {
               (after.roomLabels || []).join(",")
             )
               kinds.push("room labels");
+            if (
+              (before.elevationLabels || []).join(",") !==
+              (after.elevationLabels || []).join(",")
+            )
+              kinds.push("elevation identifiers");
             if (before.clauseFingerprint !== after.clauseFingerprint)
               kinds.push("specification clauses");
             return kinds.length ? [`P${page}: ${kinds.join(", ")}`] : [];
@@ -363,6 +369,31 @@ export default function Home() {
         .filter((row) => /floor area \/ finish/i.test(row.item))
         .map((row) => row.room.toLowerCase()),
     ),
+    coveredRoomCount = [...expectedRooms].filter((expected) =>
+      [...measuredRooms].some((measuredRoom) =>
+        roomsMatch(expected, measuredRoom),
+      ),
+    ).length,
+    planSheetCount = (manifest?.documents || []).reduce(
+      (count, document) =>
+        count + document.sheets.filter((sheet) => sheet.kind === "PLAN").length,
+      0,
+    ),
+    expectedElevationCount = (manifest?.documents || []).reduce(
+      (count, document) =>
+        count +
+        document.sheets
+          .filter((sheet) => sheet.kind === "ELEVATION")
+          .reduce(
+            (sheetCount, sheet) =>
+              sheetCount + Math.max(1, sheet.elevationLabels?.length || 0),
+            0,
+          ),
+      0,
+    ),
+    measuredElevationCount = markups.filter(
+      (markup) => markup.kind === "facade",
+    ).length,
     requiredMeasured = [
       ["room floor areas", /floor area \/ finish/i],
       ["room ceilings", /ceiling area \/ finish/i],
@@ -379,8 +410,14 @@ export default function Home() {
       : "",
     !gifa ? "External-face GIFA has not been reviewed" : "",
     !measured.length ? "No evidence-linked quantities have been measured" : "",
-    expectedRooms.size && measuredRooms.size < expectedRooms.size
-      ? `${measuredRooms.size} of ${expectedRooms.size} detected rooms have measured floor topology`
+    expectedRooms.size && coveredRoomCount < expectedRooms.size
+      ? `${coveredRoomCount} of ${expectedRooms.size} detected rooms have measured floor topology`
+      : "",
+    planSheetCount && Object.keys(gifaByFloor).length < planSheetCount
+      ? `${Object.keys(gifaByFloor).length} of ${planSheetCount} applicable floor plans have external-face GIFA`
+      : "",
+    expectedElevationCount && measuredElevationCount < expectedElevationCount
+      ? `${measuredElevationCount} of ${expectedElevationCount} identified elevations have gross/net façade markup`
       : "",
     requiredMeasured.length
       ? `Required measured coverage outstanding: ${requiredMeasured.map(([label]) => label).join(", ")}`
