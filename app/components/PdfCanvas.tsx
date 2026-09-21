@@ -45,6 +45,10 @@ import {
   type TopologyPolygon,
 } from "../../lib/takeoff/topology";
 import {
+  canonicalRoomInstances,
+  type BoqSection,
+} from "../../lib/takeoff/boqStructure";
+import {
   snapPointToVectors,
   type SnapResult,
 } from "../../lib/takeoff/snapping";
@@ -121,10 +125,13 @@ export type BoqDraft = {
   status: "REVIEW" | "UNMEASURED";
   sourcePages?: number[];
   markupRef?: string;
+  section?: BoqSection;
+  tradeCode?: string;
+  sortOrder?: number;
 };
 
 const ROOM =
-  /^(sitting room|living room|living|kitchen(?:\s*\/\s*dining)?|kitchen|dining room|dining|hall|bedroom(?:\s+\d+)?|master bedroom|bathroom|bath|wc|utility(?: room)?|study|garage|landing|ensuite|store)$/i;
+  /^(sitting room|reception room|family room|living room|living|kitchen(?:\s*\/\s*dining)?|kitchen|dining room|dining|hall|bedroom(?:\s+\d+)?|master bedroom|bathroom|bath|shower room|cloakroom|wc|utility(?: room)?|laundry|study|garage|landing|ensuite|en-suite|store|pantry|conservatory)$/i;
 const DOOR = /^(d\s*\d+[a-z]?|door\s*\d+[a-z]?)$/i;
 const WINDOW = /^(w\s*\d+[a-z]?|window\s*\d+[a-z]?)$/i;
 const DIM =
@@ -443,14 +450,19 @@ export default function PdfCanvas({
                   ),
                 ),
               ).sort(),
-              roomLabels = Array.from(
-                new Set(
-                  items
-                    .map((item) => item.text.trim())
-                    .filter((value) => ROOM.test(value))
-                    .map((value) => value.replace(/\s+/g, " ")),
+              roomLabels = canonicalRoomInstances(
+                items
+                  .filter((item) => ROOM.test(item.text.trim()))
+                  .map((item) => ({
+                    text: item.text.trim(),
+                    x: item.x,
+                    y: item.y,
+                  })),
+              )
+                .map((item) => item.text)
+                .sort((a, b) =>
+                  a.localeCompare(b, undefined, { numeric: true }),
                 ),
-              ).sort(),
               elevationLabels = Array.from(
                 new Set(
                   (
@@ -588,7 +600,7 @@ export default function PdfCanvas({
                 y: (p[1] / base.height) * 100,
               };
             });
-        setLabels(positioned(ROOM));
+        setLabels(canonicalRoomInstances(positioned(ROOM)));
         setDoorRefs(positioned(DOOR));
         setWindowRefs(positioned(WINDOW));
         const dims = positioned(DIM)
@@ -880,6 +892,8 @@ export default function PdfCanvas({
           evidence: `${base} · closed ${points.length}-vertex topology${specRefs ? ` · specification ${specRefs}` : ""}`,
           markupRef: ref,
           status: "REVIEW",
+          section: "ROOM",
+          tradeCode: "R04",
         },
         {
           id: `${ref}-CEILING`,
@@ -893,6 +907,8 @@ export default function PdfCanvas({
           evidence: `${base} · same horizontal room topology`,
           markupRef: ref,
           status: "REVIEW",
+          section: "ROOM",
+          tradeCode: "R06",
         },
         {
           id: `${ref}-SKIRT`,
@@ -911,6 +927,8 @@ export default function PdfCanvas({
           evidence: `${base} · schedule deductions${scheduleRefs ? ` · ${scheduleRefs}` : " · no matched schedule rows"}`,
           markupRef: ref,
           status: "REVIEW",
+          section: "ROOM",
+          tradeCode: "R05",
         },
       ];
     if (heightMm)
@@ -928,6 +946,8 @@ export default function PdfCanvas({
         evidence: `${base} · repeated figured height ${heightMm}mm · schedule deductions${scheduleRefs ? ` · ${scheduleRefs}` : " · no matched schedule rows"}`,
         markupRef: ref,
         status: "REVIEW",
+        section: "ROOM",
+        tradeCode: "R03",
       });
     else
       rows.push({
@@ -942,6 +962,8 @@ export default function PdfCanvas({
         evidence: `${base} · height evidence unresolved`,
         markupRef: ref,
         status: "UNMEASURED",
+        section: "ROOM",
+        tradeCode: "R03",
       });
     rows.forEach((r) => onBoq?.(r));
   };

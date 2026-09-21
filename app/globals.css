@@ -810,6 +810,21 @@ th {
   white-space: nowrap;
   border-bottom: 1px solid #cbd2d7;
 }
+.boq-group th {
+  padding: 11px 10px;
+  background: #17232e;
+  color: white;
+  border-bottom: 2px solid #d7b95d;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.boq-group.external th {
+  background: #24445d;
+}
+.boq-group.room th {
+  background: #365f7d;
+}
 td {
   padding: 10px;
   vertical-align: top;

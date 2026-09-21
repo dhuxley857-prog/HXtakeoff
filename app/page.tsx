@@ -1,7 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { FileText, LockKeyhole, Upload } from "lucide-react";
+import {
+  roomScopeRows,
+  seedBoqRows,
+  sortBoqRows,
+} from "../lib/takeoff/boqStructure";
 import { roomsMatch } from "../lib/takeoff/schedules";
 import { loadRevisionPack, saveRevisionPack } from "../lib/takeoff/packStore";
 import PdfCanvas, {
@@ -11,53 +16,7 @@ import PdfCanvas, {
   type SourceDocument,
 } from "./components/PdfCanvas";
 
-const register: [string, string, string, BoqDraft["unit"]][] = [
-  ["PRELIMS", "Project wide", "Preliminaries / general requirements", "item"],
-  ["SUBSTRUCTURE", "Project wide", "Foundations / substructure", "m³"],
-  ["GROUNDWORKS", "External / substructure", "Excavation and earthworks", "m³"],
-  ["DPC", "Ground floor", "DPC / membranes / waterproofing", "m²"],
-  ["GFLOOR", "Ground floor", "Ground-floor construction", "m²"],
-  ["EXTWALL", "Elevations", "External wall construction", "m²"],
-  ["BRICK", "Elevations", "Facing brickwork / masonry finishes", "m²"],
-  ["INTWALL", "All floors", "Internal partitions / wall construction", "m²"],
-  ["LINING", "All floors", "Wall linings / plasterboard", "m²"],
-  ["ROOF", "Roof", "Roof structure and coverings", "m²"],
-  ["INSUL", "Project wide", "Thermal / acoustic insulation", "m²"],
-  ["WINDOW", "Elevations", "Windows", "nr"],
-  ["EXTDOOR", "Elevations", "External doors", "nr"],
-  ["INTDOOR", "All floors", "Internal doors / frames / ironmongery", "nr"],
-  ["STAIR", "Internal", "Staircase / balustrades / handrails", "item"],
-  ["FLOORFIN", "All rooms", "Floor finishes", "m²"],
-  ["WALLFIN", "All rooms", "Wall finishes / decorations", "m²"],
-  ["CEILING", "All rooms", "Ceilings / soffits / decorations", "m²"],
-  ["SKIRT", "All rooms", "Skirtings / trims", "m"],
-  ["JOINERY", "Internal", "Joinery / fitted items", "item"],
-  ["KITCHEN", "Kitchen", "Kitchen fittings / worktops", "item"],
-  ["SANITARY", "Bathrooms / WC", "Sanitaryware / bathroom fittings", "nr"],
-  ["TILING", "Bathrooms / kitchen", "Wall and floor tiling", "m²"],
-  ["PLUMB", "Project wide", "Plumbing / above-ground drainage", "item"],
-  ["HEATING", "Project wide", "Heating installation", "item"],
-  ["VENT", "Project wide", "Ventilation / extract", "item"],
-  ["ELECT", "Project wide", "Electrical installation", "item"],
-  ["LIGHT", "Project wide", "Lighting / accessories", "nr"],
-  ["FIRE", "Project wide", "Fire stopping / protection", "item"],
-  ["DRAIN", "External", "Below-ground drainage", "m"],
-  ["EXTWORK", "External", "External works / paving / landscaping", "m²"],
-  ["RAIN", "External / roof", "Rainwater goods", "m"],
-  ["DECOR", "Project wide", "Decorations", "m²"],
-];
-const seed: BoqDraft[] = register.map(([id, room, item, unit]) => ({
-  id: `T001-${id}`,
-  page: 0,
-  room,
-  item,
-  unit,
-  qty: 0,
-  scope:
-    "Unmeasured until supported by coordinated drawing, schedule or specification evidence.",
-  evidence: "TEST 001 · evidence pending · no quantity assumed",
-  status: "UNMEASURED",
-}));
+const seed: BoqDraft[] = seedBoqRows();
 const TEST_SOURCES: SourceDocument[] = [
   {
     name: "52 Adley Street · UK single-dwelling Building Regulations pack · 9 sheets",
@@ -110,6 +69,20 @@ const markupSignature = (markup?: EvidenceMarkup) =>
         label: markup.label,
       })
     : "";
+const legacySeed =
+  /^T001-(?:PRELIMS|SUBSTRUCTURE|GROUNDWORKS|DPC|GFLOOR|EXTWALL|BRICK|INTWALL|LINING|ROOF|INSUL|WINDOW|EXTDOOR|INTDOOR|STAIR|FLOORFIN|WALLFIN|CEILING|SKIRT|JOINERY|KITCHEN|SANITARY|TILING|PLUMB|HEATING|VENT|ELECT|LIGHT|FIRE|DRAIN|EXTWORK|RAIN|DECOR)$/;
+const rowSection = (row: BoqDraft) =>
+  row.section ||
+  (row.room.toLowerCase().includes("external") ||
+  /façade|external|roof|rainwater|drainage|foundation|excavat/i.test(row.item)
+    ? "EXTERNAL"
+    : "ROOM");
+const groupLabel = (row: BoqDraft) =>
+  rowSection(row) === "PRELIMINARIES"
+    ? "1 · Preliminaries"
+    : rowSection(row) === "EXTERNAL"
+      ? "2 · External works and envelope"
+      : `3 · Room · ${row.room}`;
 
 export default function Home() {
   const [view, setView] = useState<"drawing" | "boq" | "nrm" | "revision">(
@@ -200,29 +173,60 @@ export default function Home() {
         previous.evidence !== row.evidence)
     )
       setApproved((value) => ({ ...value, [row.id]: false }));
-    setBoq((v) =>
-      [
+    setBoq((v) => {
+      const template = v.find(
+          (x) =>
+            x.qty === 0 &&
+            !!row.tradeCode &&
+            x.tradeCode === row.tradeCode &&
+            roomsMatch(x.room, row.room),
+        ),
+        merged = {
+          ...row,
+          sortOrder: row.sortOrder ?? template?.sortOrder,
+        };
+      return sortBoqRows([
         ...v.filter(
           (x) =>
             x.id !== row.id &&
             !(
               x.qty === 0 &&
-              x.item
-                .toLowerCase()
-                .includes(row.item.split(" /")[0].toLowerCase())
+              !!row.tradeCode &&
+              x.tradeCode === row.tradeCode &&
+              roomsMatch(x.room, row.room)
             ),
         ),
-        row,
-      ].sort(
-        (a, b) =>
-          a.page - b.page ||
-          a.room.localeCompare(b.room) ||
-          a.item.localeCompare(b.item),
-      ),
-    );
+        merged,
+      ]);
+    });
   };
   const handleManifest = (next: PackManifest) => {
     setManifest(next);
+    const roomNames = Array.from(
+      new Set(
+        next.documents.flatMap((document) =>
+          document.sheets
+            .filter((sheet) => sheet.kind === "PLAN")
+            .flatMap((sheet) => sheet.roomLabels || []),
+        ),
+      ),
+    ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    setBoq((current) => {
+      const retained = current.filter(
+        (row) =>
+          !legacySeed.test(row.id) &&
+          !(
+            row.section === "ROOM" &&
+            row.id.startsWith("T001-ROOM-") &&
+            row.qty === 0 &&
+            /evidence pending/i.test(row.evidence)
+          ),
+      );
+      const required = [...seedBoqRows(), ...roomScopeRows(roomNames)].filter(
+        (row) => !retained.some((existing) => existing.id === row.id),
+      );
+      return sortBoqRows([...retained, ...required]);
+    });
     const windows = next.openingRows.filter((r) => r.kind === "window"),
       doors = next.openingRows.filter((r) => r.kind === "door"),
       scheduled = new Set(next.openingRows.map((r) => r.tag)),
@@ -267,6 +271,8 @@ export default function Home() {
         evidence: `${qualifiedRef(windows[0], "S01")} · ${windows[0].document || "Schedule"} P${windows[0].page} · window schedule rows ${windows.map((r) => `${r.tag} → ${r.room}`).join(", ")}`,
         markupRef: qualifiedRef(windows[0], "S01"),
         status: "REVIEW",
+        section: "EXTERNAL",
+        tradeCode: "E10",
       });
     if (doors.length)
       mergeBoq({
@@ -281,6 +287,8 @@ export default function Home() {
         evidence: `${qualifiedRef(doors[0], "S02")} · ${doors[0].document || "Schedule"} P${doors[0].page} · door schedule rows ${doors.map((r) => `${r.tag} → ${r.room}`).join(", ")}`,
         markupRef: qualifiedRef(doors[0], "S02"),
         status: "REVIEW",
+        section: "ROOM",
+        tradeCode: "R07",
       });
     if (externalCandidates.length)
       mergeBoq({
@@ -295,6 +303,8 @@ export default function Home() {
         evidence: `${next.documents.length > 1 ? `D${externalCandidates[0].documentIndex + 1}-` : ""}P${String(externalCandidates[0].page).padStart(2, "0")}-S03 · plan tag index ${externalCandidates.map((entry) => `${entry.tag} → ${entry.document} P${entry.page}`).join(", ")} · schedule exception`,
         markupRef: `${next.documents.length > 1 ? `D${externalCandidates[0].documentIndex + 1}-` : ""}P${String(externalCandidates[0].page).padStart(2, "0")}-S03`,
         status: "REVIEW",
+        section: "EXTERNAL",
+        tradeCode: "E11",
       });
   };
   const changed = (row: BoqDraft) => {
@@ -517,6 +527,8 @@ export default function Home() {
       rows = [
         [
           "Ref",
+          "Section",
+          "Trade code",
           "Markup",
           "Location",
           "Description",
@@ -530,6 +542,8 @@ export default function Home() {
         ],
         ...boq.map((r, i) => [
           String(i + 1).padStart(3, "0"),
+          groupLabel(r),
+          r.tradeCode || "",
           ref(r),
           r.room,
           r.item,
@@ -587,6 +601,8 @@ export default function Home() {
         return /(plumb|heating|vent|elect|light|fire|drain|rainwater)/.test(t);
       if (name === "External works")
         return /external works|paving|landscap/.test(t);
+      if (name === "Main contractor preliminaries")
+        return r.section === "PRELIMINARIES";
       return false;
     });
     const measuredRows = rows.filter((row) => row.qty > 0),
@@ -721,6 +737,14 @@ export default function Home() {
     a.click();
     URL.revokeObjectURL(a.href);
   };
+  const visibleBoq = boq.filter(
+    (row) =>
+      (!changesOnly || changed(row)) &&
+      (!search ||
+        `${groupLabel(row)} ${row.room} ${row.item} ${row.scope}`
+          .toLowerCase()
+          .includes(search.toLowerCase())),
+  );
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -952,16 +976,16 @@ export default function Home() {
                 </tr>
               </thead>
               <tbody>
-                {boq
-                  .filter(
-                    (r) =>
-                      (!changesOnly || changed(r)) &&
-                      (!search ||
-                        `${r.room} ${r.item} ${r.scope}`
-                          .toLowerCase()
-                          .includes(search.toLowerCase())),
-                  )
-                  .map((r, i) => (
+                {visibleBoq.map((r, i) => (
+                  <Fragment key={r.id}>
+                    {(i === 0 ||
+                      groupLabel(visibleBoq[i - 1]) !== groupLabel(r)) && (
+                      <tr
+                        className={`boq-group ${rowSection(r).toLowerCase()}`}
+                      >
+                        <th colSpan={11}>{groupLabel(r)}</th>
+                      </tr>
+                    )}
                     <tr key={r.id} className={changed(r) ? "changed" : ""}>
                       <td>{String(i + 1).padStart(3, "0")}</td>
                       <td>
@@ -1047,7 +1071,8 @@ export default function Home() {
                         )}
                       </td>
                     </tr>
-                  ))}
+                  </Fragment>
+                ))}
               </tbody>
             </table>
           </div>
