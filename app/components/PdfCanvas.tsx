@@ -78,6 +78,7 @@ export type PackManifest = {
       fingerprint: string;
       dimensions: number[];
       openingRefs: string[];
+      roomLabels: string[];
       clauseFingerprint: string;
     }[];
   }[];
@@ -350,6 +351,14 @@ export default function PdfCanvas({
                   ),
                 ),
               ).sort(),
+              roomLabels = Array.from(
+                new Set(
+                  items
+                    .map((item) => item.text.trim())
+                    .filter((value) => ROOM.test(value))
+                    .map((value) => value.replace(/\s+/g, " ")),
+                ),
+              ).sort(),
               clauses = normalized
                 .split(/(?<=[.;:])\s+/)
                 .filter((s) =>
@@ -365,6 +374,7 @@ export default function PdfCanvas({
               fingerprint: hash(normalized),
               dimensions: sheetDimensions,
               openingRefs,
+              roomLabels,
               clauseFingerprint: hash(clauses),
             });
             if (kind !== "OTHER") hits.push({ page: n, kind, title });

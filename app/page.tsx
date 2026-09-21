@@ -306,6 +306,11 @@ export default function Home() {
               kinds.push("dimensions");
             if (before.openingRefs.join(",") !== after.openingRefs.join(","))
               kinds.push("door/window schedule refs");
+            if (
+              (before.roomLabels || []).join(",") !==
+              (after.roomLabels || []).join(",")
+            )
+              kinds.push("room labels");
             if (before.clauseFingerprint !== after.clauseFingerprint)
               kinds.push("specification clauses");
             return kinds.length ? [`P${page}: ${kinds.join(", ")}`] : [];
@@ -327,12 +332,44 @@ export default function Home() {
     unmeasured = boq.filter((r) => !r.qty),
     gifa = Object.values(gifaByFloor).reduce((a, b) => a + b, 0),
     approvedCount = Object.values(approved).filter(Boolean).length;
+  const expectedRooms = new Set(
+      (manifest?.documents || []).flatMap((document) =>
+        document.sheets
+          .filter((sheet) => sheet.kind === "PLAN")
+          .flatMap((sheet) => sheet.roomLabels || [])
+          .map((room) => room.toLowerCase()),
+      ),
+    ),
+    measuredRooms = new Set(
+      measured
+        .filter((row) => /floor area \/ finish/i.test(row.item))
+        .map((row) => row.room.toLowerCase()),
+    ),
+    requiredMeasured = [
+      ["room floor areas", /floor area \/ finish/i],
+      ["room ceilings", /ceiling area \/ finish/i],
+      ["net skirtings", /skirting net/i],
+      ["net façade", /external façade net/i],
+      ["window schedule", /windows coordinated/i],
+      ["door schedule", /doors coordinated/i],
+    ].filter(([, pattern]) =>
+      measured.every((row) => !(pattern as RegExp).test(row.item)),
+    );
   const acceptanceIssues = [
     !manifest || manifest.documents.length !== sources.length
       ? "Complete information pack has not been indexed"
       : "",
     !gifa ? "External-face GIFA has not been reviewed" : "",
     !measured.length ? "No evidence-linked quantities have been measured" : "",
+    expectedRooms.size && measuredRooms.size < expectedRooms.size
+      ? `${measuredRooms.size} of ${expectedRooms.size} detected rooms have measured floor topology`
+      : "",
+    requiredMeasured.length
+      ? `Required measured coverage outstanding: ${requiredMeasured.map(([label]) => label).join(", ")}`
+      : "",
+    unmeasured.some((row) => /evidence pending/i.test(row.evidence))
+      ? "Every unresolved BOQ scope must be confirmed after pack review"
+      : "",
     measured.some((row) => !approved[row.id])
       ? "Every measured BOQ line must be approved"
       : "",
@@ -421,6 +458,25 @@ export default function Home() {
     a.download = `HX-Takeoff-Test-001-Rev-${revision}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
+  };
+  const confirmUnmeasured = (row: BoqDraft) => {
+    if (!manifest || lockedRev === revision || row.qty) return;
+    const packRef = manifest.documents
+      .map((document) => `${document.name} (${document.pages} pages)`)
+      .join(" · ");
+    setBoq((value) =>
+      value.map((item) =>
+        item.id === row.id
+          ? {
+              ...item,
+              scope:
+                "Unmeasured after coordinated information-pack review; no supported geometry or dimensional build-up was resolved for this scope.",
+              evidence: `${packRef} · reviewed unmeasured · no quantity assumed`,
+              status: "UNMEASURED",
+            }
+          : item,
+      ),
+    );
   };
   const elementRows = nrmElements.map((name) => {
     const rows = boq.filter((r) => {
@@ -819,6 +875,15 @@ export default function Home() {
                             }
                           >
                             {approved[r.id] ? "Undo" : "Approve"}
+                          </button>
+                        )}
+                        {!r.qty && /evidence pending/i.test(r.evidence) && (
+                          <button
+                            className="approve"
+                            disabled={!manifest || lockedRev === revision}
+                            onClick={() => confirmUnmeasured(r)}
+                          >
+                            Confirm pack-reviewed unmeasured
                           </button>
                         )}
                       </td>
