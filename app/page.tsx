@@ -90,6 +90,15 @@ const nrmElements = [
   "Risk allowances",
   "Inflation",
 ];
+const markupSignature = (markup?: EvidenceMarkup) =>
+  markup
+    ? JSON.stringify({
+        points: markup.points,
+        quantity: markup.quantity,
+        unit: markup.unit,
+        label: markup.label,
+      })
+    : "";
 
 export default function Home() {
   const [view, setView] = useState<"drawing" | "boq" | "nrm" | "revision">(
@@ -162,7 +171,15 @@ export default function Home() {
     rates,
     markups,
   ]);
-  const mergeBoq = (row: BoqDraft) =>
+  const mergeBoq = (row: BoqDraft) => {
+    const previous = boq.find((item) => item.id === row.id);
+    if (
+      previous &&
+      (Math.abs(previous.qty - row.qty) > 0.005 ||
+        previous.scope !== row.scope ||
+        previous.evidence !== row.evidence)
+    )
+      setApproved((value) => ({ ...value, [row.id]: false }));
     setBoq((v) =>
       [
         ...v.filter(
@@ -183,6 +200,7 @@ export default function Home() {
           a.item.localeCompare(b.item),
       ),
     );
+  };
   const handleManifest = (next: PackManifest) => {
     setManifest(next);
     const windows = next.openingRows.filter((r) => r.kind === "window"),
@@ -244,13 +262,20 @@ export default function Home() {
       });
   };
   const changed = (row: BoqDraft) => {
-    const b = baseline?.boq[row.id];
+    const b = baseline?.boq[row.id],
+      markupRef =
+        row.markupRef || row.evidence.match(/\bP\d{2}-[A-Z]\d{2}\b/)?.[0] || "",
+      beforeMarkup = baseline?.markups?.find(
+        (markup) => markup.ref === markupRef,
+      ),
+      currentMarkup = markups.find((markup) => markup.ref === markupRef);
     return (
       !!baseline &&
       (!b ||
         Math.abs(b.qty - row.qty) > 0.005 ||
         b.scope !== row.scope ||
-        b.evidence !== row.evidence)
+        b.evidence !== row.evidence ||
+        markupSignature(beforeMarkup) !== markupSignature(currentMarkup))
     );
   };
   const docChanges = useMemo(() => {
@@ -424,12 +449,21 @@ export default function Home() {
     if (!baseline) return [];
     const current = new Map(boq.map((row) => [row.id, row]));
     const changedCurrent = boq.flatMap((row) => {
-      const before = baseline.boq[row.id];
+      const before = baseline.boq[row.id],
+        markupRef =
+          row.markupRef ||
+          row.evidence.match(/\bP\d{2}-[A-Z]\d{2}\b/)?.[0] ||
+          "",
+        beforeMarkup = baseline.markups?.find(
+          (markup) => markup.ref === markupRef,
+        ),
+        currentMarkup = markups.find((markup) => markup.ref === markupRef);
       if (
         before &&
         Math.abs(before.qty - row.qty) <= 0.005 &&
         before.scope === row.scope &&
-        before.evidence === row.evidence
+        before.evidence === row.evidence &&
+        markupSignature(beforeMarkup) === markupSignature(currentMarkup)
       )
         return [];
       return [
@@ -460,7 +494,7 @@ export default function Home() {
           ],
     );
     return [...changedCurrent, ...removed];
-  }, [baseline, boq]);
+  }, [baseline, boq, markups]);
   const exportNrm = () => {
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`,
       rows = [

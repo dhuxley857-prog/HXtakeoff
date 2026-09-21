@@ -156,8 +156,16 @@ const metricPolyline = (
   return (length * scale) / 1000;
 };
 const WORK_ITEMS: { label: string; unit: "m²" | "m" | "nr"; rx: RegExp }[] = [
-  { label: "Foundations / substructure", unit: "m", rx: /foundation|footing/i },
-  { label: "Excavation", unit: "m²", rx: /excavat|earthwork/i },
+  {
+    label: "Foundation centreline / trench route",
+    unit: "m",
+    rx: /foundation|footing/i,
+  },
+  {
+    label: "Excavation footprint",
+    unit: "m²",
+    rx: /excavat|earthwork/i,
+  },
   {
     label: "Ground-floor build-up",
     unit: "m²",
@@ -169,7 +177,7 @@ const WORK_ITEMS: { label: string; unit: "m²" | "m" | "nr"; rx: RegExp }[] = [
     rx: /external wall|brick|stone|render|cladding/i,
   },
   {
-    label: "Internal partitions",
+    label: "Internal partition centreline",
     unit: "m",
     rx: /partition|stud wall|blockwork/i,
   },
@@ -183,8 +191,16 @@ const WORK_ITEMS: { label: string; unit: "m²" | "m" | "nr"; rx: RegExp }[] = [
     unit: "m",
     rx: /eaves|verge|fascia|soffit/i,
   },
-  { label: "Below-ground drainage", unit: "m", rx: /drain|soil pipe/i },
-  { label: "Rainwater goods", unit: "m", rx: /rainwater|rwp|gutter/i },
+  {
+    label: "Below-ground drainage route",
+    unit: "m",
+    rx: /drain|soil pipe/i,
+  },
+  {
+    label: "Rainwater goods route",
+    unit: "m",
+    rx: /rainwater|rwp|gutter/i,
+  },
   {
     label: "Measurable MEP point",
     unit: "nr",
