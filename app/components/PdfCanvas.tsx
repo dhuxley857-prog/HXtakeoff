@@ -13,6 +13,7 @@ import {
   type CalibrationEvidence,
 } from "../../lib/takeoff/calibration";
 import { extractPdfLineSegments } from "../../lib/takeoff/pdfVectors";
+import { explicitRepeatedStoreyHeight } from "../../lib/takeoff/dimensions";
 import {
   parseOpeningSchedules,
   reconcileOpening,
@@ -484,16 +485,7 @@ export default function PdfCanvas({
           .map((x) => ({ ...x, mm: Number(x.text.replace(/\D/g, "")) }))
           .filter((x) => x.mm >= 300 && x.mm <= 30000);
         setDimensions(dims);
-        const count = new Map<number, number>();
-        dims
-          .map((d) => d.mm)
-          .filter((v) => v >= 2400 && v <= 3600)
-          .forEach((v) => count.set(v, (count.get(v) || 0) + 1));
-        setHeightMm(
-          [...count]
-            .filter(([, n]) => n >= 2)
-            .sort((a, b) => b[1] - a[1])[0]?.[0] || null,
-        );
+        setHeightMm(explicitRepeatedStoreyHeight(text));
         const host = canvas.current?.parentElement,
           renderScale = Math.max(
             0.5,
