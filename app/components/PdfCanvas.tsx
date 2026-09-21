@@ -245,7 +245,15 @@ export default function PdfCanvas({
     [markups, setMarkups] = useState<Markup[]>([]),
     [topologyNote, setTopologyNote] = useState("");
   const [facadeGross, setFacadeGross] = useState<number | null>(null),
-    [openingAreas, setOpeningAreas] = useState<number[]>([]);
+    [openingAreas, setOpeningAreas] = useState<
+      {
+        area: number;
+        ref: string;
+        tag: string;
+        schedule: OpeningScheduleRow | null;
+      }[]
+    >([]),
+    [selectedOpeningTag, setSelectedOpeningTag] = useState("");
   const [workItem, setWorkItem] = useState(WORK_ITEMS[0].label);
   const manualCalibration = validateCalibration(manualEvidence),
     activeScale = manualCalibration.valid
@@ -526,6 +534,11 @@ export default function PdfCanvas({
     return () => {
       cancelled = true;
     };
+  }, [page, currentDoc?.url]);
+  useEffect(() => {
+    setFacadeGross(null);
+    setOpeningAreas([]);
+    setSelectedOpeningTag("");
   }, [page, currentDoc?.url]);
 
   const currentScale = activeScale || 0,
@@ -820,13 +833,41 @@ export default function PdfCanvas({
         `${ref} gross façade recorded. Trace each opening before adding the net façade.`,
       );
     } else {
-      setOpeningAreas((v) => [...v, quantity]);
-      addMarkup(
-        "opening",
-        trace,
-        `Opening ${openingAreas.length + 1}`,
-        quantity,
+      const centre = trace.reduce(
+          (point, vertex) => ({
+            x: point.x + vertex.x / trace.length,
+            y: point.y + vertex.y / trace.length,
+          }),
+          { x: 0, y: 0 },
+        ),
+        nearest = [...doorRefs, ...windowRefs]
+          .map((label) => ({
+            label,
+            distance: Math.hypot(label.x - centre.x, label.y - centre.y),
+          }))
+          .sort((a, b) => a.distance - b.distance)[0],
+        tag =
+          selectedOpeningTag ||
+          (nearest?.distance < 12
+            ? nearest.label.text.toUpperCase().replace(/\s+/g, "")
+            : ""),
+        row = tag ? reconcileOpening(tag, schedule) : null,
+        ref = addMarkup(
+          "opening",
+          trace,
+          tag || `Unresolved opening ${openingAreas.length + 1}`,
+          quantity,
+        );
+      setOpeningAreas((value) => [
+        ...value,
+        { area: quantity, ref, tag, schedule: row },
+      ]);
+      setTopologyNote(
+        row
+          ? `${ref} reconciled ${row.tag} to ${row.document || "schedule"} P${row.page} and ${row.room}.`
+          : `${ref} retained as a measured opening${tag ? ` tagged ${tag}` : " without a resolved tag"}; schedule coordination remains flagged.`,
       );
+      setSelectedOpeningTag("");
     }
     setTrace([]);
   };
@@ -834,12 +875,14 @@ export default function PdfCanvas({
     if (!facadeGross) return;
     const net = netFacadeArea(
         facadeGross,
-        openingAreas.map((a) => ({ width: a, height: 1 })),
+        openingAreas.map((opening) => ({
+          width: opening.area,
+          height: 1,
+        })),
       ),
       facade = markups
         .filter((m) => m.page === page && m.kind === "facade")
         .at(-1),
-      openings = markups.filter((m) => m.page === page && m.kind === "opening"),
       scope = scopeFor(/brick|stone|render|cladding|external wall/i),
       specRefs = scope
         .map((s) => `${s.document} P${s.page}`)
@@ -857,7 +900,7 @@ export default function PdfCanvas({
         id: `${ref}-NET`,
         item: "External façade net area",
         qty: net,
-        scope: `Gross façade less ${openings.length} marked opening polygon(s).`,
+        scope: `Gross façade less ${openingAreas.length} marked opening polygon(s).`,
       },
     ].forEach((r) =>
       onBoq?.({
@@ -865,8 +908,15 @@ export default function PdfCanvas({
         page,
         room: "Elevation",
         unit: "m²",
-        sourcePages: scope.map((s) => s.page),
-        evidence: `${evidenceBase(ref)} · deductions ${openings.map((x) => x.ref).join(", ") || "none"}${specRefs ? ` · specification ${specRefs}` : ""}`,
+        sourcePages: [
+          ...new Set([
+            ...scope.map((s) => s.page),
+            ...openingAreas.flatMap((opening) =>
+              opening.schedule ? [opening.schedule.page] : [],
+            ),
+          ]),
+        ],
+        evidence: `${evidenceBase(ref)} · deductions ${openingAreas.map((opening) => `${opening.ref}${opening.tag ? ` ${opening.tag}` : " untagged"}${opening.schedule ? ` → ${opening.schedule.document || "Schedule"} P${opening.schedule.page} → ${opening.schedule.room}` : " → schedule unresolved"}`).join(", ") || "none"}${specRefs ? ` · specification ${specRefs}` : ""}`,
         markupRef: ref,
         status: "REVIEW",
       }),
@@ -1197,6 +1247,23 @@ export default function PdfCanvas({
                 ? ` · ${quantity.toFixed(2)} m² · ${tracePerimeter.toFixed(2)} m perimeter`
                 : ""}
         </span>
+        {tool === "opening" && (
+          <select
+            value={selectedOpeningTag}
+            onChange={(event) => setSelectedOpeningTag(event.target.value)}
+          >
+            <option value="">Opening tag · nearest visible tag</option>
+            {schedule.map((row) => (
+              <option
+                key={`${row.document}-${row.page}-${row.tag}`}
+                value={row.tag}
+              >
+                {row.tag} · {row.room} · {row.widthMm}
+                {row.heightMm ? `×${row.heightMm}` : ""}mm
+              </option>
+            ))}
+          </select>
+        )}
         {tool === "room" && selectedRoom && quantity > 0 && (
           <button onClick={buildRoom}>BUILD EVIDENCE-LINKED ROOM BOQ</button>
         )}
@@ -1207,6 +1274,9 @@ export default function PdfCanvas({
         )}
         {facadeGross && (
           <button onClick={addFacadeBoq}>ADD GROSS + NET FACADE TO BOQ</button>
+        )}
+        {facadeGross && (
+          <span>{openingAreas.length} façade opening(s) retained</span>
         )}
         {tool === "gifa" && quantity > 0 && (
           <button onClick={finishGifa}>SAVE EXTERNAL-FACE GIFA</button>
