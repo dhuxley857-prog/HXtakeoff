@@ -11,7 +11,10 @@ import {
   type Segment,
   type TopologyPolygon,
 } from "./topology.ts";
-import { validateCalibration } from "./calibration.ts";
+import {
+  selectCalibrationCluster,
+  validateCalibration,
+} from "./calibration.ts";
 
 const loop = (points: { x: number; y: number }[]): Segment[] =>
   points.map((p, i) => ({ a: p, b: points[(i + 1) % points.length] }));
@@ -55,6 +58,20 @@ test("door-sized collinear gaps can be closed as explicit topology evidence", ()
   );
   assert.equal(faces[0].area, 20);
 });
+test("axis-specific limits do not bridge unsupported wide openings", () => {
+  const horizontal: Segment[] = [
+    { a: { x: 0, y: 0 }, b: { x: 2, y: 0 } },
+    { a: { x: 5, y: 0 }, b: { x: 7, y: 0 } },
+  ];
+  assert.equal(
+    bridgeCollinearGaps(horizontal, { maxGapX: 1.5 }).length,
+    horizontal.length,
+  );
+  assert.equal(
+    bridgeCollinearGaps(horizontal, { maxGapX: 3.1 }).length,
+    horizontal.length + 1,
+  );
+});
 test("deductions never invent negative quantities", () => {
   assert.equal(netPerimeter(20, [0.9, 0.8]), 18.3);
   assert.equal(netWallArea(20, 2.4, [{ width: 0.9, height: 2.1 }]), 46.11);
@@ -71,6 +88,29 @@ test("calibration requires independent agreeing figured dimensions", () => {
   ]);
   assert.equal(two.valid, true);
   assert.ok(two.mmPerUnit && Math.abs(two.mmPerUnit - 100) < 0.2);
+});
+
+test("automatic calibration selects the strongest agreeing dimension cluster", () => {
+  const candidates = [
+    { id: "D1", figuredMm: 900, drawnLength: 51.02, page: 4, drawing: "P4" },
+    { id: "D2", figuredMm: 911, drawnLength: 51.65, page: 4, drawing: "P4" },
+    { id: "D3", figuredMm: 1800, drawnLength: 102.04, page: 4, drawing: "P4" },
+    { id: "D1", figuredMm: 900, drawnLength: 24.5, page: 4, drawing: "P4" },
+    { id: "D2", figuredMm: 911, drawnLength: 24.8, page: 4, drawing: "P4" },
+  ];
+  const result = selectCalibrationCluster(candidates);
+  assert.equal(result.valid, true);
+  assert.equal(result.accepted.length, 3);
+  assert.ok(Math.abs(result.mmPerUnit! - 17.64) < 0.05);
+});
+
+test("automatic calibration rejects only two agreeing dimensions", () => {
+  const result = selectCalibrationCluster([
+    { id: "D1", figuredMm: 900, drawnLength: 51, page: 4, drawing: "P4" },
+    { id: "D2", figuredMm: 1800, drawnLength: 102, page: 4, drawing: "P4" },
+  ]);
+  assert.equal(result.valid, false);
+  assert.match(result.reason, /3 independently agreeing/);
 });
 
 test("external face requires room-label coverage and rejects oversized borders", () => {

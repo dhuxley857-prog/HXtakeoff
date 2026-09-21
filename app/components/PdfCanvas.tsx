@@ -9,6 +9,7 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  selectCalibrationCluster,
   validateCalibration,
   type CalibrationEvidence,
 } from "../../lib/takeoff/calibration";
@@ -57,8 +58,13 @@ import {
 type PageKind =
   "PLAN" | "ELEVATION" | "SECTION" | "DETAIL" | "SCHEDULE" | "MEP" | "OTHER";
 type Hit = { page: number; kind: PageKind; title: string };
-type Label = { text: string; x: number; y: number };
-type Dimension = Label & { mm: number };
+type Label = {
+  text: string;
+  x: number;
+  y: number;
+  orientation?: "H" | "V";
+};
+type Dimension = Label & { mm: number; orientation: "H" | "V" };
 type Vector = {
   x1: number;
   y1: number;
@@ -605,6 +611,10 @@ export default function PdfCanvas({
                 text: String(x.str).trim(),
                 x: (p[0] / base.width) * 100,
                 y: (p[1] / base.height) * 100,
+                orientation:
+                  Math.abs(x.transform[0]) >= Math.abs(x.transform[1])
+                    ? ("H" as const)
+                    : ("V" as const),
               };
             }),
           positioned = (pattern: RegExp) =>
@@ -615,7 +625,7 @@ export default function PdfCanvas({
         const dims = positioned(DIM)
           .map((x) => ({ ...x, mm: parseFiguredDimensionMm(x.text) }))
           .filter(
-            (x): x is Label & { mm: number } =>
+            (x): x is Dimension =>
               x.mm !== null && x.mm >= 300 && x.mm <= 30000,
           );
         setDimensions(dims);
@@ -652,49 +662,45 @@ export default function PdfCanvas({
                 ? undefined
                 : [outputScale, 0, 0, outputScale, 0, 0],
           }).promise;
-        const raw: { row: Dimension; scale: number; length: number }[] = [];
-        for (const d of dims) {
+        const raw: CalibrationEvidence[] = [];
+        for (const [dimensionIndex, d] of dims.entries()) {
           lines
             .map((s) => {
               const mid = { x: (s.x1 + s.x2) / 2, y: (s.y1 + s.y2) / 2 },
                 length = Math.hypot(
                   ((s.x2 - s.x1) / 100) * base.width,
                   ((s.y2 - s.y1) / 100) * base.height,
-                );
-              return { length, distance: Math.hypot(mid.x - d.x, mid.y - d.y) };
+                ),
+                orientation =
+                  Math.abs(s.x2 - s.x1) >= Math.abs(s.y2 - s.y1) ? "H" : "V";
+              return {
+                length,
+                orientation,
+                distance: Math.hypot(mid.x - d.x, mid.y - d.y),
+              };
             })
-            .filter((x) => x.distance < 10 && x.length > 8)
+            .filter(
+              (x) =>
+                x.orientation === d.orientation &&
+                x.distance < 6 &&
+                x.length > 8,
+            )
             .sort((a, b) => a.distance - b.distance)
-            .slice(0, 8)
+            .slice(0, 12)
             .forEach((x) => {
               const scale = d.mm / x.length;
               if (scale > 0.1 && scale < 100)
-                raw.push({ row: d, scale, length: x.length });
+                raw.push({
+                  id: `P${page}-D${dimensionIndex + 1}-${d.mm}`,
+                  figuredMm: d.mm,
+                  drawnLength: x.length,
+                  page,
+                  drawing: currentDoc.name,
+                });
             });
         }
         if (raw.length) {
-          const sorted = raw.map((x) => x.scale).sort((a, b) => a - b),
-            rough = sorted[Math.floor(sorted.length / 2)],
-            unique = dims
-              .map((d, i) => {
-                const best = raw
-                  .filter((x) => x.row === d)
-                  .sort(
-                    (a, b) =>
-                      Math.abs(a.scale - rough) - Math.abs(b.scale - rough),
-                  )[0];
-                return best
-                  ? {
-                      id: `P${page}-D${i + 1}-${d.mm}`,
-                      figuredMm: d.mm,
-                      drawnLength: best.length,
-                      page,
-                      drawing: currentDoc.name,
-                    }
-                  : null;
-              })
-              .filter(Boolean) as CalibrationEvidence[],
-            result = validateCalibration(unique, 1.5);
+          const result = selectCalibrationCluster(raw, 1.5, 3);
           setAutoCalibration(result);
           setAutoScale(result.valid ? result.mmPerUnit : null);
         } else {
@@ -739,6 +745,27 @@ export default function PdfCanvas({
         : 0;
   const scopeFor = (rx: RegExp) =>
     scopeLines.filter((s) => rx.test(s.text)).slice(0, 3);
+  const vertexEvidence = (
+    points: { x: number; y: number }[],
+    supplied: (SnapResult | null)[] = [],
+  ) =>
+    points.map((point, pointIndex) => {
+      const snap =
+          supplied.length === points.length
+            ? supplied[pointIndex]
+            : snapPointToVectors(point, vectors, 0.2),
+        segmentIndexes = snap?.segmentIndexes || [];
+      return {
+        kind: snap?.kind || ("free" as const),
+        segmentIndexes,
+        vectorRefs: segmentIndexes.map((index) => {
+          const vector = vectors[index];
+          return vector
+            ? `V${index + 1} [${vector.x1.toFixed(4)},${vector.y1.toFixed(4)}→${vector.x2.toFixed(4)},${vector.y2.toFixed(4)}]${vector.source ? ` ${vector.source}` : ""}`
+            : `V${index + 1}`;
+        }),
+      };
+    });
   const addMarkup = (
     kind: EvidenceMarkup["kind"],
     points: { x: number; y: number }[],
@@ -768,20 +795,7 @@ export default function PdfCanvas({
         label,
         quantity: q,
         unit,
-        ...(traceSnaps.length === points.length
-          ? {
-              vertexEvidence: traceSnaps.map((snap) => ({
-                kind: snap?.kind || "free",
-                segmentIndexes: snap?.segmentIndexes || [],
-                vectorRefs: (snap?.segmentIndexes || []).map((index) => {
-                  const vector = vectors[index];
-                  return vector
-                    ? `V${index + 1} [${vector.x1.toFixed(4)},${vector.y1.toFixed(4)}→${vector.x2.toFixed(4)},${vector.y2.toFixed(4)}]${vector.source ? ` ${vector.source}` : ""}`
-                    : `V${index + 1}`;
-                }),
-              })),
-            }
-          : {}),
+        vertexEvidence: vertexEvidence(points, traceSnaps),
       },
     ]);
     return ref;
@@ -790,7 +804,13 @@ export default function PdfCanvas({
     `${ref} · ${currentDoc.name} · P${page} · ${manualCalibration.valid ? "two-point reviewed calibration" : `${autoCalibration?.accepted.length || 0} independently agreeing figured dimensions`} · ${currentScale.toFixed(3)} mm/PDF pt`;
   const candidateForRoom = (room: Label) => {
     if (!pageSize || !currentScale) return null;
-    const styled = vectors.filter((v) => /width=(18|24);/.test(v.source || "")),
+    const maximumOpeningMm = Math.min(
+        1500,
+        Math.max(1200, ...schedule.map((opening) => opening.widthMm || 0)),
+      ),
+      maxGapX = (maximumOpeningMm / (pageSize.w * currentScale)) * 100,
+      maxGapY = (maximumOpeningMm / (pageSize.h * currentScale)) * 100,
+      styled = vectors.filter((v) => /width=(18|24);/.test(v.source || "")),
       sourceVectors = styled.length > 40 ? styled : vectors,
       axis = sourceVectors
         .map(
@@ -809,7 +829,11 @@ export default function PdfCanvas({
           return inside && len > 0.6 && len < 30 && (dx < 0.12 || dy < 0.12);
         });
     const faces = buildClosedTopology(
-        bridgeCollinearGaps(axis, { axisTolerance: 0.15, maxGap: 9 }),
+        bridgeCollinearGaps(axis, {
+          axisTolerance: 0.15,
+          maxGapX,
+          maxGapY,
+        }),
         { snapTolerance: 0.12, minArea: 0.04, maxArea: 1200 },
       ),
       polygon = selectRoomPolygon(faces, room, { minArea: 0.2, maxArea: 1000 });
@@ -822,12 +846,27 @@ export default function PdfCanvas({
         enclosedLabels.every((label) => /kitchen|dining/i.test(label.text)),
       area = metricArea(polygon.points, pageSize, currentScale),
       perimeter = metricPerimeter(polygon.points, pageSize, currentScale),
-      compactness = area > 0 ? (perimeter * perimeter) / area : Infinity;
+      compactness = area > 0 ? (perimeter * perimeter) / area : Infinity,
+      supportedVertices = polygon.points.filter((point) =>
+        snapPointToVectors(point, vectors, 0.25),
+      ).length,
+      maximumArea = /bath|shower|ensuite|en-suite|\bwc\b|cloakroom/i.test(
+        room.text,
+      )
+        ? 25
+        : /bedroom/i.test(room.text)
+          ? 40
+          : /kitchen|dining/i.test(room.text)
+            ? 60
+            : /reception|living|family|sitting/i.test(room.text)
+              ? 70
+              : 100;
     if (
       area < 2.5 ||
-      area > 100 ||
+      area > maximumArea ||
       polygon.points.length > 16 ||
       compactness > 45 ||
+      supportedVertices / polygon.points.length < 0.8 ||
       (enclosedLabels.length > 1 && !openPlanPair)
     )
       return null;
@@ -1032,6 +1071,7 @@ export default function PdfCanvas({
         label: room.text,
         quantity: area,
         unit: "m²",
+        vertexEvidence: vertexEvidence(points),
       });
       emitRoomBoq(room, points, ref);
     }

@@ -143,10 +143,17 @@ export function closeSmallGaps(input: Segment[], tolerance = 0.35) {
 
 export function bridgeCollinearGaps(
   input: Segment[],
-  options: { axisTolerance?: number; maxGap?: number } = {},
+  options: {
+    axisTolerance?: number;
+    maxGap?: number;
+    maxGapX?: number;
+    maxGapY?: number;
+  } = {},
 ) {
   const axis = options.axisTolerance ?? 0.12,
     maxGap = options.maxGap ?? 5,
+    maxGapX = options.maxGapX ?? maxGap,
+    maxGapY = options.maxGapY ?? maxGap,
     out = [...input],
     seen = new Set<string>();
   for (let i = 0; i < input.length; i++)
@@ -168,7 +175,7 @@ export function bridgeCollinearGaps(
               : ar[0] > br[1]
                 ? [br[1], ar[0]]
                 : null;
-        if (gap && gap[1] - gap[0] <= maxGap) {
+        if (gap && gap[1] - gap[0] <= maxGapX) {
           const y = (a.a.y + a.b.y + b.a.y + b.b.y) / 4;
           p = { x: gap[0], y };
           q = { x: gap[1], y };
@@ -186,7 +193,7 @@ export function bridgeCollinearGaps(
               : ar[0] > br[1]
                 ? [br[1], ar[0]]
                 : null;
-        if (gap && gap[1] - gap[0] <= maxGap) {
+        if (gap && gap[1] - gap[0] <= maxGapY) {
           const x = (a.a.x + a.b.x + b.a.x + b.b.x) / 4;
           p = { x, y: gap[0] };
           q = { x, y: gap[1] };

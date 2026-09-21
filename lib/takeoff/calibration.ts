@@ -72,3 +72,59 @@ export function validateCalibration(
         : `Calibration spread ${spread.toFixed(2)}% exceeds ${tolerancePct}%`,
   };
 }
+
+export function selectCalibrationCluster(
+  candidates: CalibrationEvidence[],
+  tolerancePct = 1.5,
+  minimumIndependent = 3,
+): CalibrationResult {
+  const usable = candidates.filter(
+    (candidate) =>
+      candidate.id &&
+      candidate.figuredMm > 0 &&
+      candidate.drawnLength > 0 &&
+      Number.isFinite(candidate.figuredMm / candidate.drawnLength),
+  );
+  let best: CalibrationResult | null = null;
+  for (const anchor of usable) {
+    const anchorScale = anchor.figuredMm / anchor.drawnLength,
+      nearby = usable.filter(
+        (candidate) =>
+          (Math.abs(candidate.figuredMm / candidate.drawnLength - anchorScale) /
+            anchorScale) *
+            100 <=
+          tolerancePct,
+      ),
+      byDimension = new Map<string, CalibrationEvidence>();
+    for (const candidate of nearby) {
+      const previous = byDimension.get(candidate.id);
+      if (
+        !previous ||
+        Math.abs(candidate.figuredMm / candidate.drawnLength - anchorScale) <
+          Math.abs(previous.figuredMm / previous.drawnLength - anchorScale)
+      )
+        byDimension.set(candidate.id, candidate);
+    }
+    const result = validateCalibration([...byDimension.values()], tolerancePct);
+    if (
+      !result.valid ||
+      result.accepted.length < minimumIndependent ||
+      (best &&
+        (result.accepted.length < best.accepted.length ||
+          (result.accepted.length === best.accepted.length &&
+            result.spreadPct >= best.spreadPct)))
+    )
+      continue;
+    best = result;
+  }
+  return (
+    best || {
+      valid: false,
+      mmPerUnit: null,
+      spreadPct: Infinity,
+      accepted: [],
+      rejected: usable,
+      reason: `${minimumIndependent} independently agreeing figured dimensions are required for automatic calibration`,
+    }
+  );
+}
