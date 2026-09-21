@@ -6,8 +6,10 @@ import {
   netFacadeArea,
   netPerimeter,
   netWallArea,
+  selectExternalFace,
   selectRoomPolygon,
   type Segment,
+  type TopologyPolygon,
 } from "./topology.ts";
 import { validateCalibration } from "./calibration.ts";
 
@@ -69,4 +71,35 @@ test("calibration requires independent agreeing figured dimensions", () => {
   ]);
   assert.equal(two.valid, true);
   assert.ok(two.mmPerUnit && Math.abs(two.mmPerUnit - 100) < 0.2);
+});
+
+test("external face requires room-label coverage and rejects oversized borders", () => {
+  const labels = [
+      { x: 2, y: 2 },
+      { x: 8, y: 2 },
+      { x: 2, y: 8 },
+      { x: 8, y: 8 },
+    ],
+    rectangle = (id: string, size: number): TopologyPolygon => ({
+      id,
+      points: [
+        { x: 0, y: 0 },
+        { x: size, y: 0 },
+        { x: size, y: size },
+        { x: 0, y: size },
+      ],
+      area: size * size,
+      perimeter: size * 4,
+    }),
+    selected = selectExternalFace(
+      [
+        rectangle("room", 5),
+        rectangle("building", 10),
+        rectangle("border", 50),
+      ],
+      labels,
+      { minArea: 30, maxArea: 500, minLabelCoverage: 0.7 },
+    );
+  assert.equal(selected?.polygon.id, "building");
+  assert.equal(selected?.enclosedLabels.length, 4);
 });

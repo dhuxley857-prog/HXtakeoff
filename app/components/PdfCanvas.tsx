@@ -38,6 +38,7 @@ import {
   pointInPolygon,
   polygonArea,
   polygonPerimeter,
+  selectExternalFace,
   selectRoomPolygon,
   type Segment,
   type TopologyPolygon,
@@ -964,6 +965,106 @@ export default function PdfCanvas({
     setTool("inspect");
     setTrace([]);
   };
+  const candidateForGifa = () => {
+    if (!pageSize || !currentScale || labels.length < 2) return null;
+    const styled = vectors.filter((v) => /width=(18|24);/.test(v.source || "")),
+      sourceVectors = styled.length > 40 ? styled : vectors,
+      xs = labels.map((label) => label.x),
+      ys = labels.map((label) => label.y),
+      bounds = {
+        left: Math.max(0, Math.min(...xs) - 18),
+        right: Math.min(100, Math.max(...xs) + 18),
+        top: Math.max(0, Math.min(...ys) - 18),
+        bottom: Math.min(100, Math.max(...ys) + 18),
+      },
+      axis = sourceVectors
+        .map(
+          (v) =>
+            ({ a: { x: v.x1, y: v.y1 }, b: { x: v.x2, y: v.y2 } }) as Segment,
+        )
+        .filter((segment) => {
+          const dx = Math.abs(segment.b.x - segment.a.x),
+            dy = Math.abs(segment.b.y - segment.a.y),
+            length = Math.hypot(dx, dy),
+            inside =
+              Math.max(segment.a.x, segment.b.x) >= bounds.left &&
+              Math.min(segment.a.x, segment.b.x) <= bounds.right &&
+              Math.max(segment.a.y, segment.b.y) >= bounds.top &&
+              Math.min(segment.a.y, segment.b.y) <= bounds.bottom;
+          return (
+            inside && length > 0.6 && length < 80 && (dx < 0.12 || dy < 0.12)
+          );
+        });
+    if (axis.length < 4 || axis.length > 2500) return null;
+    const polygons = buildClosedTopology(
+      bridgeCollinearGaps(axis, { axisTolerance: 0.15, maxGap: 9 }),
+      { snapTolerance: 0.12, minArea: 0.04, maxArea: 5000 },
+    );
+    return selectExternalFace(polygons, labels, {
+      areaOf: (polygon) => metricArea(polygon.points, pageSize, currentScale),
+      perimeterOf: (polygon) =>
+        metricPerimeter(polygon.points, pageSize, currentScale),
+      minArea: 30,
+      maxArea: 500,
+      minLabelCoverage: 0.7,
+      maxVertices: 40,
+      maxCompactness: 100,
+    });
+  };
+  const emitGifa = (
+    points: { x: number; y: number }[],
+    evidenceDetail: string,
+  ) => {
+    if (!pageSize || !currentScale || points.length < 3) return null;
+    const area = metricArea(points, pageSize, currentScale),
+      floorTitle =
+        sheetHits.find((hit) => hit.page === page)?.title || `Floor P${page}`,
+      floor = `${docs.length > 1 ? `${currentDoc.name} · ` : ""}${floorTitle}`,
+      ref = addMarkup("gifa", points, `${floor} external face`, area),
+      evidence = `${evidenceBase(ref)} · ${evidenceDetail}`;
+    onGifa?.(floor, Number(area.toFixed(2)), evidence);
+    onBoq?.({
+      id: `${ref}-GIFA`,
+      page,
+      room: floor,
+      item: "GIFA external-face floor polygon",
+      unit: "m²",
+      qty: Number(area.toFixed(2)),
+      scope:
+        "External-face polygon measured separately from room finishes for NRM1 analysis.",
+      evidence,
+      markupRef: ref,
+      status: "REVIEW",
+    });
+    return ref;
+  };
+  const autoMeasureGifa = () => {
+    if (readOnly || !pageSize || !currentScale || pageKind !== "PLAN") return;
+    const existing = markups.some(
+      (markup) =>
+        markup.page === page &&
+        markup.kind === "gifa" &&
+        (!markup.document || markup.document === currentDoc.name),
+    );
+    if (existing) return;
+    const candidate = candidateForGifa();
+    if (!candidate) {
+      setTopologyNote(
+        "No defensible external-face GIFA polygon passed the closure, calibration, area, shape and room-enclosure gates. GIFA remains unmeasured for manual tracing.",
+      );
+      return;
+    }
+    const ref = emitGifa(
+      candidate.polygon.points,
+      `automatic external-face closed topology · ${candidate.enclosedLabels.length}/${labels.length} room labels enclosed`,
+    );
+    if (ref)
+      setTopologyNote(
+        `${ref} retained as a review-only GIFA candidate · ${candidate.enclosedLabels.length}/${labels.length} room labels enclosed.`,
+      );
+    setTool("inspect");
+    setTrace([]);
+  };
   const startAutoPlanPack = () => {
     if (readOnly || !planPages.length) return;
     const queue = [...planPages],
@@ -987,8 +1088,10 @@ export default function PdfCanvas({
       return;
     }
     if (renderedKey !== `${target.documentIndex}:${target.page}`) return;
-    if (activeScale) autoMeasureRooms();
-    else
+    if (activeScale) {
+      autoMeasureRooms();
+      autoMeasureGifa();
+    } else
       setTopologyNote(
         `D${target.documentIndex + 1} P${target.page} skipped · no independently validated sheet calibration.`,
       );
@@ -1000,7 +1103,7 @@ export default function PdfCanvas({
       setPage(remaining[0].page);
     } else
       setTopologyNote(
-        "Plan-pack room topology run complete. Review every retained markup; skipped or rejected rooms remain explicitly unresolved.",
+        "Plan-pack room and external-face GIFA topology run complete. Review every retained markup; skipped or rejected quantities remain explicitly unresolved.",
       );
     // This effect advances only when a newly rendered queue target is ready.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1119,24 +1222,7 @@ export default function PdfCanvas({
   };
   const finishGifa = () => {
     if (!pageSize || !currentScale || trace.length < 3) return;
-    const floorTitle =
-        sheetHits.find((h) => h.page === page)?.title || `Floor P${page}`,
-      floor = `${docs.length > 1 ? `${currentDoc.name} · ` : ""}${floorTitle}`,
-      ref = addMarkup("gifa", trace, `${floor} external face`, quantity);
-    onGifa?.(floor, Number(quantity.toFixed(2)), evidenceBase(ref));
-    onBoq?.({
-      id: `${ref}-GIFA`,
-      page,
-      room: floor,
-      item: "GIFA external-face floor polygon",
-      unit: "m²",
-      qty: Number(quantity.toFixed(2)),
-      scope:
-        "External-face polygon measured separately from room finishes for NRM1 analysis.",
-      evidence: evidenceBase(ref),
-      markupRef: ref,
-      status: "REVIEW",
-    });
+    emitGifa(trace, "manually reviewed external-face closed polygon");
     setTrace([]);
     setTool("inspect");
   };
@@ -1292,6 +1378,13 @@ export default function PdfCanvas({
           title="Batch only closed CAD faces that pass calibration and room sanity gates"
         >
           AUTO ROOMS
+        </button>
+        <button
+          disabled={readOnly || pageKind !== "PLAN" || !activeScale}
+          onClick={autoMeasureGifa}
+          title="Retain only a calibrated closed external face that encloses most identified room labels"
+        >
+          AUTO GIFA
         </button>
         <button
           disabled={readOnly || !planPages.length || autoPlanQueue.length > 0}

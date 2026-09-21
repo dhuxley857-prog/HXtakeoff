@@ -304,6 +304,49 @@ export function selectRoomPolygon(
   );
 }
 
+export function selectExternalFace(
+  polygons: TopologyPolygon[],
+  labels: Point[],
+  options: {
+    areaOf?: (polygon: TopologyPolygon) => number;
+    perimeterOf?: (polygon: TopologyPolygon) => number;
+    minArea?: number;
+    maxArea?: number;
+    minLabelCoverage?: number;
+    maxVertices?: number;
+    maxCompactness?: number;
+  } = {},
+) {
+  if (labels.length < 2) return null;
+  const areaOf = options.areaOf || ((polygon) => polygon.area),
+    perimeterOf = options.perimeterOf || ((polygon) => polygon.perimeter),
+    minimumLabels = Math.max(
+      2,
+      Math.ceil(labels.length * (options.minLabelCoverage ?? 0.7)),
+    ),
+    candidates = polygons
+      .map((polygon) => {
+        const area = areaOf(polygon),
+          perimeter = perimeterOf(polygon),
+          enclosedLabels = labels.filter((label) =>
+            pointInPolygon(label, polygon.points),
+          ),
+          compactness = area > 0 ? (perimeter * perimeter) / area : Infinity;
+        return { polygon, area, perimeter, enclosedLabels, compactness };
+      })
+      .filter(
+        (candidate) =>
+          candidate.area >= (options.minArea ?? 0) &&
+          candidate.area <= (options.maxArea ?? Infinity) &&
+          candidate.polygon.points.length <=
+            (options.maxVertices ?? Infinity) &&
+          candidate.compactness <= (options.maxCompactness ?? Infinity) &&
+          candidate.enclosedLabels.length >= minimumLabels,
+      )
+      .sort((a, b) => b.area - a.area);
+  return candidates[0] || null;
+}
+
 export function netPerimeter(gross: number, openingWidths: number[]) {
   return Math.max(
     0,
