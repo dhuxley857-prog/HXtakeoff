@@ -45,7 +45,8 @@ import {
   type TopologyPolygon,
 } from "../../lib/takeoff/topology";
 import {
-  canonicalRoomInstances,
+  drawingPhase,
+  locateRoomInstances,
   type BoqSection,
 } from "../../lib/takeoff/boqStructure";
 import {
@@ -100,6 +101,7 @@ export type PackManifest = {
     sheets: {
       page: number;
       kind: PageKind;
+      phase?: "EXISTING" | "PROPOSED" | "UNKNOWN";
       title: string;
       fingerprint: string;
       dimensions: number[];
@@ -450,7 +452,7 @@ export default function PdfCanvas({
                   ),
                 ),
               ).sort(),
-              roomLabels = canonicalRoomInstances(
+              roomLabels = locateRoomInstances(
                 items
                   .filter((item) => ROOM.test(item.text.trim()))
                   .map((item) => ({
@@ -458,6 +460,11 @@ export default function PdfCanvas({
                     x: item.x,
                     y: item.y,
                   })),
+                items.map((item) => ({
+                  text: item.text,
+                  x: item.x,
+                  y: item.y,
+                })),
               )
                 .map((item) => item.text)
                 .sort((a, b) =>
@@ -492,6 +499,7 @@ export default function PdfCanvas({
             sheets.push({
               page: n,
               kind,
+              phase: drawingPhase(normalized),
               title,
               fingerprint: hash(normalized),
               dimensions: sheetDimensions,
@@ -586,9 +594,8 @@ export default function PdfCanvas({
           .filter((s) => Math.hypot(s.x2 - s.x1, s.y2 - s.y1) > 0.2);
         if (cancelled) return;
         setVectors(lines);
-        const positioned = (pattern: RegExp) =>
-          (tc.items as any[])
-            .filter((x) => x.str && pattern.test(String(x.str).trim()))
+        const positionedText = (tc.items as any[])
+            .filter((x) => x.str)
             .map((x) => {
               const p = base.convertToViewportPoint(
                 x.transform[4],
@@ -599,8 +606,10 @@ export default function PdfCanvas({
                 x: (p[0] / base.width) * 100,
                 y: (p[1] / base.height) * 100,
               };
-            });
-        setLabels(canonicalRoomInstances(positioned(ROOM)));
+            }),
+          positioned = (pattern: RegExp) =>
+            positionedText.filter((item) => pattern.test(item.text));
+        setLabels(locateRoomInstances(positioned(ROOM), positionedText));
         setDoorRefs(positioned(DOOR));
         setWindowRefs(positioned(WINDOW));
         const dims = positioned(DIM)

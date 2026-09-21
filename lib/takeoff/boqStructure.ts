@@ -525,3 +525,56 @@ export const canonicalRoomInstances = <
     text: numbered.get(label) || label.text.trim().replace(/\s+/g, " "),
   }));
 };
+
+const floorName = (text: string) => {
+  const match = text.match(
+    /\b(ground|first|second|third|loft|basement)\s+(?:floor\s+)?plan\b/i,
+  );
+  return match
+    ? `${match[1][0].toUpperCase()}${match[1].slice(1).toLowerCase()} Floor`
+    : null;
+};
+
+export const locateRoomInstances = <
+  T extends { text: string; x: number; y: number },
+>(
+  labels: T[],
+  drawingText: T[],
+): T[] => {
+  const headings = drawingText.flatMap((item) => {
+    const floor = floorName(item.text);
+    return floor ? [{ ...item, floor }] : [];
+  });
+  if (!headings.length) return canonicalRoomInstances(labels);
+  const located = labels.map((label) => {
+    const nearest = headings.reduce((best, heading) =>
+      Math.abs(heading.x - label.x) < Math.abs(best.x - label.x)
+        ? heading
+        : best,
+    );
+    return { label, floor: nearest.floor };
+  });
+  const groups = new Map<string, typeof located>();
+  located.forEach((entry) => {
+    const key = `${entry.floor}|${entry.label.text.trim().toLowerCase()}`;
+    groups.set(key, [...(groups.get(key) || []), entry]);
+  });
+  const suffix = new Map<T, number>();
+  groups.forEach((members) => {
+    if (members.length < 2) return;
+    [...members]
+      .sort((a, b) => a.label.x - b.label.x || a.label.y - b.label.y)
+      .forEach((entry, index) => suffix.set(entry.label, index + 1));
+  });
+  return located.map(({ label, floor }) => ({
+    ...label,
+    text: `${floor} · ${label.text.trim().replace(/\s+/g, " ")}${suffix.has(label) ? ` ${suffix.get(label)}` : ""}`,
+  }));
+};
+
+export const drawingPhase = (text: string) =>
+  /\bproposed\b/i.test(text)
+    ? ("PROPOSED" as const)
+    : /\bexisting\b/i.test(text)
+      ? ("EXISTING" as const)
+      : ("UNKNOWN" as const);

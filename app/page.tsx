@@ -83,6 +83,17 @@ const groupLabel = (row: BoqDraft) =>
     : rowSection(row) === "EXTERNAL"
       ? "2 · External works and envelope"
       : `3 · Room · ${row.room}`;
+const takeoffSheets = (
+  pack: PackManifest | null,
+  kind: PackManifest["documents"][number]["sheets"][number]["kind"],
+) => {
+  const sheets = (pack?.documents || []).flatMap((document) =>
+      document.sheets.filter((sheet) => sheet.kind === kind),
+    ),
+    proposed = sheets.filter((sheet) => sheet.phase === "PROPOSED"),
+    current = sheets.filter((sheet) => sheet.phase !== "EXISTING");
+  return proposed.length ? proposed : current.length ? current : sheets;
+};
 
 export default function Home() {
   const [view, setView] = useState<"drawing" | "boq" | "nrm" | "revision">(
@@ -202,14 +213,12 @@ export default function Home() {
   };
   const handleManifest = (next: PackManifest) => {
     setManifest(next);
+    const proposedPlans = takeoffSheets(next, "PLAN"),
+      proposedPlanPages = new Set(
+        proposedPlans.map((sheet) => `${sheet.page}|${sheet.fingerprint}`),
+      );
     const roomNames = Array.from(
-      new Set(
-        next.documents.flatMap((document) =>
-          document.sheets
-            .filter((sheet) => sheet.kind === "PLAN")
-            .flatMap((sheet) => sheet.roomLabels || []),
-        ),
-      ),
+      new Set(proposedPlans.flatMap((sheet) => sheet.roomLabels || [])),
     ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     setBoq((current) => {
       const retained = current.filter(
@@ -232,7 +241,9 @@ export default function Home() {
       scheduled = new Set(next.openingRows.map((r) => r.tag)),
       planDoorEntries = next.documents.flatMap((document, documentIndex) =>
         document.sheets
-          .filter((sheet) => sheet.kind === "PLAN")
+          .filter((sheet) =>
+            proposedPlanPages.has(`${sheet.page}|${sheet.fingerprint}`),
+          )
           .flatMap((sheet) =>
             sheet.openingRefs
               .filter((tag) => tag.startsWith("D"))
@@ -396,12 +407,9 @@ export default function Home() {
     gifa = Object.values(gifaByFloor).reduce((a, b) => a + b, 0),
     approvedCount = Object.values(approved).filter(Boolean).length;
   const expectedRooms = new Set(
-      (manifest?.documents || []).flatMap((document) =>
-        document.sheets
-          .filter((sheet) => sheet.kind === "PLAN")
-          .flatMap((sheet) => sheet.roomLabels || [])
-          .map((room) => room.toLowerCase()),
-      ),
+      takeoffSheets(manifest, "PLAN")
+        .flatMap((sheet) => sheet.roomLabels || [])
+        .map((room) => room.toLowerCase()),
     ),
     measuredRooms = new Set(
       measured
@@ -413,21 +421,9 @@ export default function Home() {
         roomsMatch(expected, measuredRoom),
       ),
     ).length,
-    planSheetCount = (manifest?.documents || []).reduce(
-      (count, document) =>
-        count + document.sheets.filter((sheet) => sheet.kind === "PLAN").length,
-      0,
-    ),
-    expectedElevationCount = (manifest?.documents || []).reduce(
-      (count, document) =>
-        count +
-        document.sheets
-          .filter((sheet) => sheet.kind === "ELEVATION")
-          .reduce(
-            (sheetCount, sheet) =>
-              sheetCount + Math.max(1, sheet.elevationLabels?.length || 0),
-            0,
-          ),
+    planSheetCount = takeoffSheets(manifest, "PLAN").length,
+    expectedElevationCount = takeoffSheets(manifest, "ELEVATION").reduce(
+      (count, sheet) => count + Math.max(1, sheet.elevationLabels?.length || 0),
       0,
     ),
     measuredElevationCount = markups.filter(

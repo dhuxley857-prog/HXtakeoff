@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   canonicalRoomInstances,
   externalRows,
+  drawingPhase,
+  locateRoomInstances,
   preliminariesRows,
   roomScopeRows,
   seedBoqRows,
@@ -75,4 +77,35 @@ test("sorting keeps preliminaries, external work and room scopes in hierarchy", 
   assert.equal(rows[0].section, "PRELIMINARIES");
   assert.equal(rows[15].section, "EXTERNAL");
   assert.equal(rows.at(-1)?.section, "ROOM");
+});
+
+test("rooms are coordinated to their nearest floor-plan heading", () => {
+  const rooms = locateRoomInstances(
+    [
+      { text: "BEDROOM", x: 48, y: 20 },
+      { text: "BEDROOM", x: 52, y: 40 },
+      { text: "BEDROOM", x: 85, y: 20 },
+      { text: "KITCHEN", x: 15, y: 30 },
+    ],
+    [
+      { text: "PROPOSED GROUND FLOOR PLAN", x: 15, y: 90 },
+      { text: "PROPOSED FIRST FLOOR PLAN", x: 50, y: 90 },
+      { text: "PROPOSED LOFT FLOOR PLAN", x: 85, y: 90 },
+    ],
+  );
+  assert.deepEqual(
+    rooms.map((room) => room.text),
+    [
+      "First Floor · BEDROOM 1",
+      "First Floor · BEDROOM 2",
+      "Loft Floor · BEDROOM",
+      "Ground Floor · KITCHEN",
+    ],
+  );
+});
+
+test("drawing phase prefers proposed scope when a sheet is clearly titled", () => {
+  assert.equal(drawingPhase("04 PROPOSED FLOOR PLANS"), "PROPOSED");
+  assert.equal(drawingPhase("01 EXISTING FLOOR PLANS"), "EXISTING");
+  assert.equal(drawingPhase("GENERAL DETAILS"), "UNKNOWN");
 });
