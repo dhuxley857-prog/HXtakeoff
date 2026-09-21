@@ -449,6 +449,9 @@ export default function Home() {
     measured.some((row) => !approved[row.id])
       ? "Every measured BOQ line must be approved"
       : "",
+    measured.some((row) => !(rates[row.id] > 0))
+      ? "Every measured BOQ line requires an explicit cost rate for NRM1"
+      : "",
   ].filter(Boolean);
   const ref = (r: BoqDraft) =>
     r.markupRef ||
@@ -512,6 +515,8 @@ export default function Home() {
           "Scope",
           "Qty",
           "Unit",
+          "Rate",
+          "Cost",
           "Evidence",
           "Status",
         ],
@@ -523,6 +528,8 @@ export default function Home() {
           r.scope,
           r.qty || "",
           r.unit,
+          rates[r.id] || "",
+          r.qty && rates[r.id] ? r.qty * rates[r.id] : "",
           r.evidence,
           approved[r.id] ? "APPROVED" : r.status,
         ]),
@@ -574,9 +581,40 @@ export default function Home() {
         return /external works|paving|landscap/.test(t);
       return false;
     });
-    const quantity = rows.reduce((a, r) => a + r.qty, 0),
-      rate = rates[name] || 0;
-    return { name, rows, quantity, rate, cost: quantity * rate };
+    const measuredRows = rows.filter((row) => row.qty > 0),
+      unresolvedRows = rows.filter((row) => !row.qty),
+      quantities = measuredRows.reduce<Record<string, number>>(
+        (totals, row) => ({
+          ...totals,
+          [row.unit]: (totals[row.unit] || 0) + row.qty,
+        }),
+        {},
+      ),
+      quantitySummary = Object.entries(quantities)
+        .map(([unit, quantity]) => `${quantity.toFixed(2)} ${unit}`)
+        .join(" · "),
+      ratedRows = measuredRows.filter((row) => rates[row.id] > 0),
+      cost = measuredRows.reduce(
+        (total, row) => total + row.qty * (rates[row.id] || 0),
+        0,
+      ),
+      status = !measuredRows.length
+        ? "UNRESOLVED"
+        : ratedRows.length < measuredRows.length
+          ? "UNRATED"
+          : unresolvedRows.length
+            ? "PARTIAL"
+            : "COSTED";
+    return {
+      name,
+      rows,
+      measuredRows,
+      unresolvedRows,
+      quantitySummary,
+      ratedRows,
+      cost,
+      status,
+    };
   });
   const boqChanges = useMemo(() => {
     if (!baseline) return [];
@@ -633,24 +671,38 @@ export default function Home() {
       rows = [
         [
           "NRM1 element",
-          "Evidence-linked BOQ lines",
+          "BOQ line",
+          "Description",
+          "Location",
           "Quantity",
+          "Unit",
           "Rate",
           "Cost",
           "Cost/GIFA",
           "GIFA",
+          "Evidence",
           "Status",
         ],
-        ...elementRows.map((row) => [
-          row.name,
-          row.rows.map((line) => line.id).join(" | "),
-          row.quantity || "",
-          row.rate || "",
-          row.cost || "",
-          row.cost && gifa ? row.cost / gifa : "",
-          gifa || "",
-          row.quantity && row.rate ? "COSTED" : "UNRESOLVED",
-        ]),
+        ...elementRows.flatMap((element) =>
+          element.rows.map((line) => {
+            const rate = rates[line.id] || 0,
+              cost = line.qty * rate;
+            return [
+              element.name,
+              line.id,
+              line.item,
+              line.room,
+              line.qty || "",
+              line.unit,
+              rate || "",
+              cost || "",
+              cost && gifa ? cost / gifa : "",
+              gifa || "",
+              line.evidence,
+              !line.qty ? "UNRESOLVED" : rate ? "COSTED" : "UNRATED",
+            ];
+          }),
+        ),
       ],
       blob = new Blob([rows.map((row) => row.map(esc).join(",")).join("\n")], {
         type: "text/csv",
@@ -886,6 +938,8 @@ export default function Home() {
                     "Scope / coordination",
                     "Qty",
                     "Unit",
+                    "Rate",
+                    "Cost",
                     "Evidence",
                     "Status",
                   ].map((h) => (
@@ -933,6 +987,30 @@ export default function Home() {
                         {r.qty ? r.qty.toFixed(2) : "—"}
                       </td>
                       <td>{r.unit}</td>
+                      <td>
+                        {r.qty ? (
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={rates[r.id] || ""}
+                            onChange={(event) =>
+                              setRates((value) => ({
+                                ...value,
+                                [r.id]: Number(event.target.value),
+                              }))
+                            }
+                            placeholder={`£/${r.unit}`}
+                          />
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="number">
+                        {r.qty && rates[r.id]
+                          ? `£${(r.qty * rates[r.id]).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                          : "—"}
+                      </td>
                       <td>{r.evidence}</td>
                       <td>
                         <span
@@ -999,8 +1077,8 @@ export default function Home() {
                 {[
                   "NRM1 element",
                   "Evidence-linked BOQ lines",
-                  "Quantity",
-                  "Rate",
+                  "Quantities by unit",
+                  "Line rates",
                   "Cost",
                   "£/m² GIFA",
                   "Status",
@@ -1015,20 +1093,42 @@ export default function Home() {
                   <td>
                     <strong>{x.name}</strong>
                   </td>
-                  <td>{x.rows.length || "—"}</td>
-                  <td>{x.quantity ? x.quantity.toFixed(2) : "—"}</td>
                   <td>
-                    <input
-                      type="number"
-                      value={x.rate || ""}
-                      onChange={(e) =>
-                        setRates((v) => ({
-                          ...v,
-                          [x.name]: Number(e.target.value),
-                        }))
-                      }
-                      placeholder="£ rate"
-                    />
+                    {x.rows.length ? (
+                      <div className="nrm-lines">
+                        {x.rows.map((line) => (
+                          <span key={line.id}>
+                            {line.item} · {line.qty ? line.qty.toFixed(2) : "—"}{" "}
+                            {line.unit}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td>{x.quantitySummary || "—"}</td>
+                  <td>
+                    <div className="nrm-rates">
+                      {x.measuredRows.map((line) => (
+                        <label key={line.id}>
+                          <span>{line.item}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={rates[line.id] || ""}
+                            onChange={(event) =>
+                              setRates((value) => ({
+                                ...value,
+                                [line.id]: Number(event.target.value),
+                              }))
+                            }
+                            placeholder={`£/${line.unit}`}
+                          />
+                        </label>
+                      ))}
+                    </div>
                   </td>
                   <td>
                     {x.cost
@@ -1040,9 +1140,9 @@ export default function Home() {
                   </td>
                   <td>
                     <span
-                      className={`status ${x.quantity && x.rate ? "approved" : "unmeasured"}`}
+                      className={`status ${x.status === "COSTED" ? "approved" : x.status === "PARTIAL" ? "review" : "unmeasured"}`}
                     >
-                      {x.quantity && x.rate ? "COSTED" : "UNRESOLVED"}
+                      {x.status}
                     </span>
                   </td>
                 </tr>
