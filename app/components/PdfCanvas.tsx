@@ -44,6 +44,10 @@ import {
   type Segment,
   type TopologyPolygon,
 } from "../../lib/takeoff/topology";
+import {
+  snapPointToVectors,
+  type SnapResult,
+} from "../../lib/takeoff/snapping";
 
 type PageKind =
   "PLAN" | "ELEVATION" | "SECTION" | "DETAIL" | "SCHEDULE" | "MEP" | "OTHER";
@@ -76,6 +80,11 @@ export type EvidenceMarkup = {
   label: string;
   quantity: number;
   unit: "m²" | "m" | "m³" | "nr";
+  vertexEvidence?: {
+    kind: SnapResult["kind"] | "free";
+    segmentIndexes: number[];
+    vectorRefs: string[];
+  }[];
 };
 
 export type SourceDocument = { name: string; url: string; revision?: string };
@@ -331,7 +340,10 @@ export default function PdfCanvas({
   const [selectedDimIndex, setSelectedDimIndex] = useState<number | null>(null),
     [calPts, setCalPts] = useState<{ x: number; y: number }[]>([]),
     [tool, setTool] = useState<Tool>("inspect"),
-    [trace, setTrace] = useState<{ x: number; y: number }[]>([]);
+    [trace, setTrace] = useState<{ x: number; y: number }[]>([]),
+    [traceSnaps, setTraceSnaps] = useState<(SnapResult | null)[]>([]),
+    [lastSnap, setLastSnap] = useState<SnapResult | null>(null),
+    [zoom, setZoom] = useState(1);
   const [selectedRoom, setSelectedRoom] = useState<Label | null>(null),
     [heightMm, setHeightMm] = useState<number | null>(null),
     [topologyNote, setTopologyNote] = useState("");
@@ -673,6 +685,12 @@ export default function PdfCanvas({
     setOpeningAreas([]);
     setSelectedOpeningTag("");
   }, [page, currentDoc?.url]);
+  useEffect(() => {
+    if (!trace.length) {
+      setTraceSnaps([]);
+      setLastSnap(null);
+    }
+  }, [trace.length]);
 
   const currentScale = activeScale || 0,
     quantity =
@@ -718,6 +736,20 @@ export default function PdfCanvas({
         label,
         quantity: q,
         unit,
+        ...(traceSnaps.length === points.length
+          ? {
+              vertexEvidence: traceSnaps.map((snap) => ({
+                kind: snap?.kind || "free",
+                segmentIndexes: snap?.segmentIndexes || [],
+                vectorRefs: (snap?.segmentIndexes || []).map((index) => {
+                  const vector = vectors[index];
+                  return vector
+                    ? `V${index + 1} [${vector.x1.toFixed(4)},${vector.y1.toFixed(4)}→${vector.x2.toFixed(4)},${vector.y2.toFixed(4)}]${vector.source ? ` ${vector.source}` : ""}`
+                    : `V${index + 1}`;
+                }),
+              })),
+            }
+          : {}),
       },
     ]);
     return ref;
@@ -1299,10 +1331,13 @@ export default function PdfCanvas({
   const clickDrawing = (e: React.MouseEvent<HTMLDivElement>) => {
     if (tool === "inspect" || readOnly) return;
     const r = e.currentTarget.getBoundingClientRect(),
-      p = {
+      rawPoint = {
         x: ((e.clientX - r.left) / r.width) * 100,
         y: ((e.clientY - r.top) / r.height) * 100,
-      };
+      },
+      snap = snapPointToVectors(rawPoint, vectors, 0.9 / zoom),
+      p = snap?.point || rawPoint;
+    setLastSnap(snap);
     const selectedDimension =
       selectedDimIndex === null ? null : dimensions[selectedDimIndex];
     if (tool === "calibrate" && selectedDimension) {
@@ -1328,6 +1363,7 @@ export default function PdfCanvas({
       return;
     }
     setTrace((v) => [...v, p]);
+    setTraceSnaps((value) => [...value, snap]);
   };
   const shown = markups.filter(
       (m) => m.page === page && (!m.document || m.document === currentDoc.name),
@@ -1443,6 +1479,23 @@ export default function PdfCanvas({
           </button>
         ))}
         <button onClick={() => setTrace([])}>CLEAR</button>
+        <button
+          onClick={() => setZoom((value) => Math.max(1, value - 0.5))}
+          disabled={zoom <= 1}
+          title="Zoom out"
+        >
+          −
+        </button>
+        <button onClick={() => setZoom(1)} title="Reset drawing zoom">
+          {Math.round(zoom * 100)}%
+        </button>
+        <button
+          onClick={() => setZoom((value) => Math.min(4, value + 0.5))}
+          disabled={zoom >= 4}
+          title="Zoom in for precise vector snapping"
+        >
+          +
+        </button>
       </div>
       <div className="evidence-strip">
         {readOnly && <strong>LOCKED · START A NEW REVISION TO MEASURE</strong>}
@@ -1474,124 +1527,146 @@ export default function PdfCanvas({
           {pageManualEvidence.length} sheet-specific manual evidence line(s)
         </span>
         {busy && <span>Reading drawing…</span>}
+        {lastSnap && (
+          <strong>
+            SNAP {lastSnap.kind.toUpperCase()} · vector
+            {lastSnap.segmentIndexes.length === 1 ? " " : "s "}
+            {lastSnap.segmentIndexes.map((index) => index + 1).join("+")}
+          </strong>
+        )}
       </div>
       {topologyNote && <div className="topology-note">{topologyNote}</div>}
-      <div
-        className="drawing-stage"
-        onClick={clickDrawing}
-        onTouchStart={(e) => {
-          touchStart.current = e.touches[0]?.clientX ?? null;
-        }}
-        onTouchEnd={(e) => {
-          if (touchStart.current === null) return;
-          const dx = e.changedTouches[0].clientX - touchStart.current;
-          touchStart.current = null;
-          if (Math.abs(dx) < 60 || tool !== "inspect") return;
-          if (dx < 0 && page < pages) setPage((v) => v + 1);
-          if (dx > 0 && page > 1) setPage((v) => v - 1);
-        }}
-      >
-        <canvas ref={canvas} />
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-          {shown.map((m) => (
-            <g key={m.ref}>
-              {m.unit === "m" || (m.unit === "m³" && m.points.length < 3) ? (
-                <polyline
-                  points={m.points.map((p) => `${p.x},${p.y}`).join(" ")}
-                  className={`markup ${m.kind} ${focusMarkup === m.ref ? "focused" : ""}`}
-                  fill="none"
-                />
-              ) : m.unit === "nr" ? (
-                m.points.map((p, i) => (
-                  <circle
-                    key={i}
-                    cx={p.x}
-                    cy={p.y}
-                    r=".65"
+      <div className="drawing-viewport">
+        <div
+          className="drawing-stage"
+          style={{ zoom }}
+          onClick={clickDrawing}
+          onTouchStart={(e) => {
+            touchStart.current = e.touches[0]?.clientX ?? null;
+          }}
+          onTouchEnd={(e) => {
+            if (touchStart.current === null) return;
+            const dx = e.changedTouches[0].clientX - touchStart.current;
+            touchStart.current = null;
+            if (Math.abs(dx) < 60 || tool !== "inspect") return;
+            if (dx < 0 && page < pages) setPage((v) => v + 1);
+            if (dx > 0 && page > 1) setPage((v) => v - 1);
+          }}
+        >
+          <canvas ref={canvas} />
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+            {shown.map((m) => (
+              <g key={m.ref}>
+                {m.unit === "m" || (m.unit === "m³" && m.points.length < 3) ? (
+                  <polyline
+                    points={m.points.map((p) => `${p.x},${p.y}`).join(" ")}
+                    className={`markup ${m.kind} ${focusMarkup === m.ref ? "focused" : ""}`}
+                    fill="none"
+                  />
+                ) : m.unit === "nr" ? (
+                  m.points.map((p, i) => (
+                    <circle
+                      key={i}
+                      cx={p.x}
+                      cy={p.y}
+                      r=".65"
+                      className={`markup ${m.kind} ${focusMarkup === m.ref ? "focused" : ""}`}
+                    />
+                  ))
+                ) : (
+                  <polygon
+                    points={m.points.map((p) => `${p.x},${p.y}`).join(" ")}
                     className={`markup ${m.kind} ${focusMarkup === m.ref ? "focused" : ""}`}
                   />
-                ))
-              ) : (
-                <polygon
-                  points={m.points.map((p) => `${p.x},${p.y}`).join(" ")}
-                  className={`markup ${m.kind} ${focusMarkup === m.ref ? "focused" : ""}`}
-                />
-              )}
-              <text
-                x={m.points[0]?.x || 0}
-                y={Math.max(1, (m.points[0]?.y || 0) - 0.8)}
+                )}
+                <text
+                  x={m.points[0]?.x || 0}
+                  y={Math.max(1, (m.points[0]?.y || 0) - 0.8)}
+                >
+                  {m.ref} · {m.quantity.toFixed(2)} {m.unit}
+                </text>
+              </g>
+            ))}
+            {trace.length > 1 && (
+              <polygon
+                points={trace.map((p) => `${p.x},${p.y}`).join(" ")}
+                className="trace"
+              />
+            )}
+            {trace.map((p, i) => (
+              <circle
+                key={i}
+                cx={p.x}
+                cy={p.y}
+                r=".55"
+                className={`trace-point ${traceSnaps[i]?.segmentIndexes.length ? `snap-${traceSnaps[i].kind}` : "unsnapped"}`}
               >
-                {m.ref} · {m.quantity.toFixed(2)} {m.unit}
-              </text>
-            </g>
-          ))}
-          {trace.length > 1 && (
-            <polygon
-              points={trace.map((p) => `${p.x},${p.y}`).join(" ")}
-              className="trace"
-            />
-          )}
-          {trace.map((p, i) => (
-            <circle key={i} cx={p.x} cy={p.y} r=".55" className="trace-point" />
-          ))}
-          {calPts.length === 2 && (
-            <line
-              x1={calPts[0].x}
-              y1={calPts[0].y}
-              x2={calPts[1].x}
-              y2={calPts[1].y}
-              className="cal-line"
-            />
-          )}
-        </svg>
-        {labels.map((l, i) => (
-          <button
-            key={i}
-            disabled={readOnly}
-            className={`room-label ${selectedRoom?.text === l.text ? "selected" : ""}`}
-            style={{ left: l.x + "%", top: l.y + "%" }}
-            onClick={(e) => {
-              e.stopPropagation();
-              runTopology(l);
-            }}
-          >
-            {l.text}
-          </button>
-        ))}
-        {doorRefs.map((d, i) => {
-          const row = reconcileOpening(d.text, schedule);
-          return (
-            <span
-              key={"d" + i}
-              className="drawing-tag door"
-              style={{ left: d.x + "%", top: d.y + "%" }}
-              title={
-                row
-                  ? `${row.tag} · ${row.widthMm}mm · schedule P${row.page}`
-                  : `${d.text} · schedule unresolved`
-              }
+                <title>
+                  {traceSnaps[i]
+                    ? `${traceSnaps[i]!.kind} snap · ${traceSnaps[i]!.segmentIndexes.map((index) => `V${index + 1}`).join("+")}`
+                    : "Free point · no CAD vector within tolerance"}
+                </title>
+              </circle>
+            ))}
+            {calPts.length === 2 && (
+              <line
+                x1={calPts[0].x}
+                y1={calPts[0].y}
+                x2={calPts[1].x}
+                y2={calPts[1].y}
+                className="cal-line"
+              />
+            )}
+          </svg>
+          {labels.map((l, i) => (
+            <button
+              key={i}
+              disabled={readOnly}
+              className={`room-label ${selectedRoom?.text === l.text ? "selected" : ""}`}
+              style={{ left: l.x + "%", top: l.y + "%" }}
+              onClick={(e) => {
+                e.stopPropagation();
+                runTopology(l);
+              }}
             >
-              {d.text}
-            </span>
-          );
-        })}
-        {windowRefs.map((d, i) => {
-          const row = reconcileOpening(d.text, schedule);
-          return (
-            <span
-              key={"w" + i}
-              className="drawing-tag window"
-              style={{ left: d.x + "%", top: d.y + "%" }}
-              title={
-                row
-                  ? `${row.tag} · ${row.widthMm}×${row.heightMm}mm · schedule P${row.page}`
-                  : `${d.text} · schedule unresolved`
-              }
-            >
-              {d.text}
-            </span>
-          );
-        })}
+              {l.text}
+            </button>
+          ))}
+          {doorRefs.map((d, i) => {
+            const row = reconcileOpening(d.text, schedule);
+            return (
+              <span
+                key={"d" + i}
+                className="drawing-tag door"
+                style={{ left: d.x + "%", top: d.y + "%" }}
+                title={
+                  row
+                    ? `${row.tag} · ${row.widthMm}mm · schedule P${row.page}`
+                    : `${d.text} · schedule unresolved`
+                }
+              >
+                {d.text}
+              </span>
+            );
+          })}
+          {windowRefs.map((d, i) => {
+            const row = reconcileOpening(d.text, schedule);
+            return (
+              <span
+                key={"w" + i}
+                className="drawing-tag window"
+                style={{ left: d.x + "%", top: d.y + "%" }}
+                title={
+                  row
+                    ? `${row.tag} · ${row.widthMm}×${row.heightMm}mm · schedule P${row.page}`
+                    : `${d.text} · schedule unresolved`
+                }
+              >
+                {d.text}
+              </span>
+            );
+          })}
+        </div>
       </div>
       <div className="measurement-actions">
         <span>

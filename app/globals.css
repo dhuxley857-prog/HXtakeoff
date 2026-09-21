@@ -626,6 +626,12 @@ button {
   border-bottom: 1px solid #dfc982;
   font-size: 12px;
 }
+.drawing-viewport {
+  overflow: auto;
+  max-width: 100%;
+  max-height: 75vh;
+  overscroll-behavior: contain;
+}
 .drawing-stage {
   position: relative;
   margin: 12px auto;
@@ -680,6 +686,24 @@ button {
 }
 .trace-point {
   fill: #2d7058;
+}
+.trace-point.snap-endpoint {
+  fill: #245c8a;
+  stroke: white;
+  stroke-width: 0.18;
+}
+.trace-point.snap-intersection {
+  fill: #b42318;
+  stroke: white;
+  stroke-width: 0.18;
+}
+.trace-point.snap-projection {
+  fill: #c08a00;
+  stroke: white;
+  stroke-width: 0.18;
+}
+.trace-point.unsnapped {
+  fill: #66727c;
 }
 .cal-line {
   stroke: #b42318;
@@ -990,7 +1014,6 @@ td small {
   .drawing-stage {
     margin: 8px 0;
     width: 100%;
-    overflow: auto;
   }
   .drawing-stage canvas {
     max-width: none;
