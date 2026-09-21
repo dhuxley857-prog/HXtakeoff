@@ -180,6 +180,26 @@ const WORK_ITEMS: { label: string; unit: "m²" | "m" | "nr"; rx: RegExp }[] = [
     rx: /external wall|brick|stone|render|cladding/i,
   },
   {
+    label: "Facing brickwork façade zone",
+    unit: "m²",
+    rx: /facing brick|brickwork/i,
+  },
+  {
+    label: "Facing stonework façade zone",
+    unit: "m²",
+    rx: /facing stone|stonework/i,
+  },
+  {
+    label: "Rendered façade zone",
+    unit: "m²",
+    rx: /render/i,
+  },
+  {
+    label: "Cladding façade zone",
+    unit: "m²",
+    rx: /cladding/i,
+  },
+  {
     label: "Internal partition centreline",
     unit: "m",
     rx: /partition|stud wall|blockwork/i,
@@ -283,6 +303,8 @@ export default function PdfCanvas({
         ref: string;
         tag: string;
         schedule: OpeningScheduleRow | null;
+        scheduledArea: number | null;
+        variancePct: number | null;
       }[]
     >([]),
     [selectedOpeningTag, setSelectedOpeningTag] = useState("");
@@ -878,6 +900,13 @@ export default function PdfCanvas({
             ? nearest.label.text.toUpperCase().replace(/\s+/g, "")
             : ""),
         row = tag ? reconcileOpening(tag, schedule) : null,
+        scheduledArea =
+          row?.heightMm && row.widthMm
+            ? (row.widthMm * row.heightMm) / 1_000_000
+            : null,
+        variancePct = scheduledArea
+          ? (Math.abs(quantity - scheduledArea) / scheduledArea) * 100
+          : null,
         ref = addMarkup(
           "opening",
           trace,
@@ -886,11 +915,11 @@ export default function PdfCanvas({
         );
       setOpeningAreas((value) => [
         ...value,
-        { area: quantity, ref, tag, schedule: row },
+        { area: quantity, ref, tag, schedule: row, scheduledArea, variancePct },
       ]);
       setTopologyNote(
         row
-          ? `${ref} reconciled ${row.tag} to ${row.document || "schedule"} P${row.page} and ${row.room}.`
+          ? `${ref} reconciled ${row.tag} to ${row.document || "schedule"} P${row.page} and ${row.room}${variancePct === null ? "" : ` · traced ${quantity.toFixed(2)} m² vs scheduled ${scheduledArea!.toFixed(2)} m² · ${variancePct.toFixed(1)}% variance${variancePct > 10 ? " · REVIEW REQUIRED" : ""}`}.`
           : `${ref} retained as a measured opening${tag ? ` tagged ${tag}` : " without a resolved tag"}; schedule coordination remains flagged.`,
       );
       setSelectedOpeningTag("");
@@ -942,7 +971,7 @@ export default function PdfCanvas({
             ),
           ]),
         ],
-        evidence: `${evidenceBase(ref)} · deductions ${openingAreas.map((opening) => `${opening.ref}${opening.tag ? ` ${opening.tag}` : " untagged"}${opening.schedule ? ` → ${opening.schedule.document || "Schedule"} P${opening.schedule.page} → ${opening.schedule.room}` : " → schedule unresolved"}`).join(", ") || "none"}${specRefs ? ` · specification ${specRefs}` : ""}`,
+        evidence: `${evidenceBase(ref)} · deductions ${openingAreas.map((opening) => `${opening.ref}${opening.tag ? ` ${opening.tag}` : " untagged"}${opening.schedule ? ` → ${opening.schedule.document || "Schedule"} P${opening.schedule.page} → ${opening.schedule.room}` : " → schedule unresolved"}${opening.scheduledArea ? ` → traced ${opening.area.toFixed(2)} m² / scheduled ${opening.scheduledArea.toFixed(2)} m² / ${opening.variancePct!.toFixed(1)}% variance${opening.variancePct! > 10 ? " REVIEW" : ""}` : ""}`).join(", ") || "none"}${specRefs ? ` · specification ${specRefs}` : ""}`,
         markupRef: ref,
         status: "REVIEW",
       }),
