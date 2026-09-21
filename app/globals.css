@@ -637,13 +637,13 @@ button {
   margin: 12px auto;
   background: white;
   width: fit-content;
-  max-width: 100%;
+  max-width: none;
   cursor: crosshair;
   box-shadow: 0 3px 14px #0002;
 }
 .drawing-stage canvas {
   display: block;
-  max-width: 100%;
+  max-width: none;
   height: auto;
 }
 .drawing-stage > svg {

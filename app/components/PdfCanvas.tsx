@@ -599,17 +599,25 @@ export default function PdfCanvas({
           );
         setDimensions(dims);
         setHeightMm(explicitRepeatedStoreyHeight(text));
-        const host = canvas.current?.parentElement,
-          renderScale = Math.max(
-            0.5,
-            Math.min(2, (host?.clientWidth || 900) / base.width),
+        const host = canvas.current?.closest(".drawing-viewport"),
+          baseRenderScale = Math.max(
+            0.2,
+            Math.min(
+              2,
+              ((host as HTMLElement | null)?.clientWidth || 900) / base.width,
+            ),
           ),
+          renderScale = baseRenderScale * zoom,
           vp = pg.getViewport({ scale: renderScale }),
           el = canvas.current;
         if (!el) return;
-        const dpr = window.devicePixelRatio || 1;
-        el.width = Math.floor(vp.width * dpr);
-        el.height = Math.floor(vp.height * dpr);
+        const dpr = window.devicePixelRatio || 1,
+          outputScale = Math.max(
+            1,
+            Math.min(dpr, 6144 / Math.max(vp.width, vp.height)),
+          );
+        el.width = Math.floor(vp.width * outputScale);
+        el.height = Math.floor(vp.height * outputScale);
         el.style.width = vp.width + "px";
         el.style.height = vp.height + "px";
         const ctx = el.getContext("2d");
@@ -618,7 +626,10 @@ export default function PdfCanvas({
             canvas: el,
             canvasContext: ctx,
             viewport: vp,
-            transform: dpr === 1 ? undefined : [dpr, 0, 0, dpr, 0, 0],
+            transform:
+              outputScale === 1
+                ? undefined
+                : [outputScale, 0, 0, outputScale, 0, 0],
           }).promise;
         const raw: { row: Dimension; scale: number; length: number }[] = [];
         for (const d of dims) {
@@ -679,7 +690,7 @@ export default function PdfCanvas({
     return () => {
       cancelled = true;
     };
-  }, [page, currentDoc?.url]);
+  }, [page, currentDoc?.url, zoom]);
   useEffect(() => {
     setFacadeGross(null);
     setOpeningAreas([]);
@@ -1539,7 +1550,6 @@ export default function PdfCanvas({
       <div className="drawing-viewport">
         <div
           className="drawing-stage"
-          style={{ zoom }}
           onClick={clickDrawing}
           onTouchStart={(e) => {
             touchStart.current = e.touches[0]?.clientX ?? null;
