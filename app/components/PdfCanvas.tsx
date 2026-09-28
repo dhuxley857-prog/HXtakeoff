@@ -1194,6 +1194,14 @@ export default function PdfCanvas({
         }),
         { snapTolerance: 0.12, minArea: 0.04, maxArea: 5000 },
       )
+        .filter((polygon) => {
+          const area = metricArea(polygon.points, pageSize, currentScale);
+          return (
+            area >= 30 &&
+            area <= 500 &&
+            floorLabels.every((label) => pointInPolygon(label, polygon.points))
+          );
+        })
         .map((polygon) => {
           const points = simplifyPolygon(
             removePolygonSpurs(polygon.points),
