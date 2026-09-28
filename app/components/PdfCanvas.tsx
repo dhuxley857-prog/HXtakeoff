@@ -1107,18 +1107,40 @@ export default function PdfCanvas({
   };
   const candidateForGifa = () => {
     if (!pageSize || !currentScale || labels.length < 2) return [];
-    const maximumOpeningMm = Math.min(
+    const scheduleOpeningMm = Math.max(
+        1200,
+        ...schedule.map((opening) => opening.widthMm || 0),
+      ),
+      maximumOpeningXmm = Math.min(
         2400,
         Math.max(
-          1200,
-          ...schedule.map((opening) => opening.widthMm || 0),
+          scheduleOpeningMm,
           ...dimensions
-            .filter((dimension) => dimension.mm >= 600 && dimension.mm <= 2400)
+            .filter(
+              (dimension) =>
+                dimension.orientation === "H" &&
+                dimension.mm >= 600 &&
+                dimension.mm <= 2400,
+            )
             .map((dimension) => dimension.mm),
         ),
       ),
-      maxGapX = (maximumOpeningMm / (pageSize.w * currentScale)) * 100,
-      maxGapY = (maximumOpeningMm / (pageSize.h * currentScale)) * 100,
+      maximumOpeningYmm = Math.min(
+        2400,
+        Math.max(
+          scheduleOpeningMm,
+          ...dimensions
+            .filter(
+              (dimension) =>
+                dimension.orientation === "V" &&
+                dimension.mm >= 600 &&
+                dimension.mm <= 2400,
+            )
+            .map((dimension) => dimension.mm),
+        ),
+      ),
+      maxGapX = (maximumOpeningXmm / (pageSize.w * currentScale)) * 100,
+      maxGapY = (maximumOpeningYmm / (pageSize.h * currentScale)) * 100,
       styled = vectors.filter((v) =>
         /stroke=#000000;.*width=12;paint=20/.test(v.source || ""),
       ),
@@ -1208,7 +1230,8 @@ export default function PdfCanvas({
               floor,
               candidate,
               labelCount: floorLabels.length,
-              closureMm: maximumOpeningMm,
+              closureXmm: maximumOpeningXmm,
+              closureYmm: maximumOpeningYmm,
             },
           ]
         : [];
@@ -1265,10 +1288,10 @@ export default function PdfCanvas({
       return;
     }
     const retained = candidates.flatMap(
-      ({ floor, candidate, labelCount, closureMm }) => {
+      ({ floor, candidate, labelCount, closureXmm, closureYmm }) => {
         const ref = emitGifa(
           candidate.polygon.points,
-          `automatic external-face closed topology · ${candidate.enclosedLabels.length}/${labelCount} ${floor.toLowerCase()} room labels enclosed · collinear opening closure limited by sheet figure ${closureMm}mm · CAD branch spurs removed without changing enclosed area`,
+          `automatic external-face closed topology · ${candidate.enclosedLabels.length}/${labelCount} ${floor.toLowerCase()} room labels enclosed · axis-specific collinear closure H ${closureXmm}mm / V ${closureYmm}mm from sheet figures/schedule · CAD branch spurs removed without changing enclosed area`,
           floor,
         );
         return ref ? [ref] : [];
