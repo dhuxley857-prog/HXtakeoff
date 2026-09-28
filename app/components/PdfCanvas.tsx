@@ -1126,34 +1126,45 @@ export default function PdfCanvas({
         /stroke=#(?:000000|808080|545454);/.test(v.source || ""),
       ),
       sourceVectors = styled.length > 100 ? styled : fallback,
-      xs = labels.map((label) => label.x),
-      ys = labels.map((label) => label.y),
-      bounds = {
-        left: Math.max(0, Math.min(...xs) - 18),
-        right: Math.min(100, Math.max(...xs) + 18),
-        top: Math.max(0, Math.min(...ys) - 18),
-        bottom: Math.min(100, Math.max(...ys) + 18),
-      },
-      axis = sourceVectors
-        .map(
-          (v) =>
-            ({ a: { x: v.x1, y: v.y1 }, b: { x: v.x2, y: v.y2 } }) as Segment,
-        )
-        .filter((segment) => {
-          const dx = Math.abs(segment.b.x - segment.a.x),
-            dy = Math.abs(segment.b.y - segment.a.y),
-            length = Math.hypot(dx, dy),
-            inside =
-              Math.max(segment.a.x, segment.b.x) >= bounds.left &&
-              Math.min(segment.a.x, segment.b.x) <= bounds.right &&
-              Math.max(segment.a.y, segment.b.y) >= bounds.top &&
-              Math.min(segment.a.y, segment.b.y) <= bounds.bottom;
-          return (
-            inside && length > 0.6 && length < 80 && (dx < 0.12 || dy < 0.12)
-          );
-        });
-    if (axis.length < 4 || axis.length > 2500) return [];
-    const polygons = buildClosedTopology(
+      floorGroups = labels.reduce((groups, label) => {
+        const separator = label.text.indexOf(" · "),
+          floor = separator > 0 ? label.text.slice(0, separator) : "Floor";
+        groups.set(floor, [...(groups.get(floor) || []), label]);
+        return groups;
+      }, new Map<string, Label[]>());
+    return [...floorGroups.entries()].flatMap(([floor, floorLabels]) => {
+      if (floorLabels.length < 2) return [];
+      const xs = floorLabels.map((label) => label.x),
+        ys = floorLabels.map((label) => label.y),
+        bounds = {
+          left: Math.max(0, Math.min(...xs) - 18),
+          right: Math.min(100, Math.max(...xs) + 18),
+          top: Math.max(0, Math.min(...ys) - 18),
+          bottom: Math.min(100, Math.max(...ys) + 18),
+        },
+        axis = sourceVectors
+          .map(
+            (vector) =>
+              ({
+                a: { x: vector.x1, y: vector.y1 },
+                b: { x: vector.x2, y: vector.y2 },
+              }) as Segment,
+          )
+          .filter((segment) => {
+            const dx = Math.abs(segment.b.x - segment.a.x),
+              dy = Math.abs(segment.b.y - segment.a.y),
+              length = Math.hypot(dx, dy),
+              inside =
+                Math.max(segment.a.x, segment.b.x) >= bounds.left &&
+                Math.min(segment.a.x, segment.b.x) <= bounds.right &&
+                Math.max(segment.a.y, segment.b.y) >= bounds.top &&
+                Math.min(segment.a.y, segment.b.y) <= bounds.bottom;
+            return (
+              inside && length > 0.6 && length < 80 && (dx < 0.12 || dy < 0.12)
+            );
+          });
+      if (axis.length < 4 || axis.length > 1250) return [];
+      const polygons = buildClosedTopology(
         bridgeCollinearGaps(axis, {
           axisTolerance: 0.15,
           maxGapX,
@@ -1176,15 +1187,7 @@ export default function PdfCanvas({
         .filter(
           (polygon) =>
             polygon.points.length >= 3 && isSimplePolygon(polygon.points, 0.02),
-        ),
-      floorGroups = labels.reduce((groups, label) => {
-        const separator = label.text.indexOf(" · "),
-          floor = separator > 0 ? label.text.slice(0, separator) : "Floor";
-        groups.set(floor, [...(groups.get(floor) || []), label]);
-        return groups;
-      }, new Map<string, Label[]>());
-    return [...floorGroups.entries()].flatMap(([floor, floorLabels]) => {
-      if (floorLabels.length < 2) return [];
+        );
       const candidate = selectExternalFace(polygons, floorLabels, {
         areaOf: (polygon) => metricArea(polygon.points, pageSize, currentScale),
         perimeterOf: (polygon) =>
@@ -1795,140 +1798,3 @@ export default function PdfCanvas({
                 className="cal-line"
               />
             )}
-          </svg>
-          {labels.map((l, i) => (
-            <button
-              key={i}
-              disabled={readOnly}
-              className={`room-label ${selectedRoom?.text === l.text ? "selected" : ""}`}
-              style={{ left: l.x + "%", top: l.y + "%" }}
-              onClick={(e) => {
-                e.stopPropagation();
-                runTopology(l);
-              }}
-            >
-              {l.text}
-            </button>
-          ))}
-          {doorRefs.map((d, i) => {
-            const row = reconcileOpening(d.text, schedule);
-            return (
-              <span
-                key={"d" + i}
-                className="drawing-tag door"
-                style={{ left: d.x + "%", top: d.y + "%" }}
-                title={
-                  row
-                    ? `${row.tag} · ${row.widthMm}mm · schedule P${row.page}`
-                    : `${d.text} · schedule unresolved`
-                }
-              >
-                {d.text}
-              </span>
-            );
-          })}
-          {windowRefs.map((d, i) => {
-            const row = reconcileOpening(d.text, schedule);
-            return (
-              <span
-                key={"w" + i}
-                className="drawing-tag window"
-                style={{ left: d.x + "%", top: d.y + "%" }}
-                title={
-                  row
-                    ? `${row.tag} · ${row.widthMm}×${row.heightMm}mm · schedule P${row.page}`
-                    : `${d.text} · schedule unresolved`
-                }
-              >
-                {d.text}
-              </span>
-            );
-          })}
-        </div>
-      </div>
-      <div className="measurement-actions">
-        <span>
-          {trace.length} vertices
-          {tool === "count"
-            ? ` · ${trace.length} nr`
-            : tool === "length" && traceLength > 0
-              ? ` · ${traceLength.toFixed(2)} m`
-              : quantity > 0
-                ? ` · ${quantity.toFixed(2)} m² · ${tracePerimeter.toFixed(2)} m perimeter`
-                : ""}
-        </span>
-        {tool === "opening" && (
-          <select
-            value={selectedOpeningTag}
-            onChange={(event) => setSelectedOpeningTag(event.target.value)}
-          >
-            <option value="">Opening tag · nearest visible tag</option>
-            {schedule.map((row) => (
-              <option
-                key={`${row.document}-${row.page}-${row.tag}`}
-                value={row.tag}
-              >
-                {row.tag} · {row.room} · {row.widthMm}
-                {row.heightMm ? `×${row.heightMm}` : ""}mm
-              </option>
-            ))}
-          </select>
-        )}
-        {activeWorkItem.factors?.map((factor, factorIndex) => (
-          <select
-            key={factor}
-            value={workFactorIndices[factorIndex] ?? ""}
-            onChange={(event) =>
-              setWorkFactorIndices((value) => {
-                const next = [...value];
-                next[factorIndex] =
-                  event.target.value === "" ? null : Number(event.target.value);
-                return next;
-              })
-            }
-          >
-            <option value="">{factor} · select drawing dimension</option>
-            {dimensions.slice(0, 80).map((dimension, index) => (
-              <option key={`${factor}-${index}`} value={index}>
-                D{index + 1} · {dimension.mm}mm · P{page}
-              </option>
-            ))}
-          </select>
-        ))}
-        {tool === "room" && selectedRoom && quantity > 0 && (
-          <button onClick={buildRoom}>BUILD EVIDENCE-LINKED ROOM BOQ</button>
-        )}
-        {(tool === "facade" || tool === "opening") && quantity > 0 && (
-          <button onClick={finishFacade}>
-            {tool === "facade" ? "SAVE GROSS FACADE" : "SAVE OPENING DEDUCTION"}
-          </button>
-        )}
-        {facadeGross && (
-          <button onClick={addFacadeBoq}>ADD GROSS + NET FACADE TO BOQ</button>
-        )}
-        {facadeGross && (
-          <span>{openingAreas.length} façade opening(s) retained</span>
-        )}
-        {tool === "gifa" && quantity > 0 && (
-          <button onClick={finishGifa}>SAVE EXTERNAL-FACE GIFA</button>
-        )}
-        {(["area", "length", "count"] as Tool[]).includes(tool) &&
-          tool === workGeometry &&
-          workFactorsReady &&
-          ((workGeometry === "count" && trace.length > 0) ||
-            (workGeometry === "length" && trace.length > 1) ||
-            (workGeometry === "area" && quantity > 0)) && (
-            <button onClick={finishWork}>
-              ADD MEASURED {activeWorkItem.unit === "m³" ? "VOLUME" : "WORK"} TO
-              BOQ
-            </button>
-          )}
-        <span>
-          {schedule.length} schedule openings indexed · {scopeLines.length}{" "}
-          construction-information clauses indexed
-        </span>
-      </div>
-      {error && <div className="pdf-error">{error}</div>}
-    </div>
-  );
-}
