@@ -1107,7 +1107,8 @@ export default function PdfCanvas({
   };
   const candidateForGifa = () => {
     if (!pageSize || !currentScale || labels.length < 2) return [];
-    const scheduleOpeningMm = Math.max(
+    const closureEndpointTolerance = 1.05,
+      scheduleOpeningMm = Math.max(
         1200,
         ...schedule.map((opening) => opening.widthMm || 0),
       ),
@@ -1139,8 +1140,14 @@ export default function PdfCanvas({
             .map((dimension) => dimension.mm),
         ),
       ),
-      maxGapX = (maximumOpeningXmm / (pageSize.w * currentScale)) * 100,
-      maxGapY = (maximumOpeningYmm / (pageSize.h * currentScale)) * 100,
+      maxGapX =
+        (maximumOpeningXmm * closureEndpointTolerance /
+          (pageSize.w * currentScale)) *
+        100,
+      maxGapY =
+        (maximumOpeningYmm * closureEndpointTolerance /
+          (pageSize.h * currentScale)) *
+        100,
       styled = vectors.filter((v) =>
         /stroke=#000000;.*width=12;paint=20/.test(v.source || ""),
       ),
@@ -1240,6 +1247,7 @@ export default function PdfCanvas({
               labelCount: floorLabels.length,
               closureXmm: maximumOpeningXmm,
               closureYmm: maximumOpeningYmm,
+              closureEndpointTolerance,
             },
           ]
         : [];
@@ -1296,10 +1304,17 @@ export default function PdfCanvas({
       return;
     }
     const retained = candidates.flatMap(
-      ({ floor, candidate, labelCount, closureXmm, closureYmm }) => {
+      ({
+        floor,
+        candidate,
+        labelCount,
+        closureXmm,
+        closureYmm,
+        closureEndpointTolerance,
+      }) => {
         const ref = emitGifa(
           candidate.polygon.points,
-          `automatic external-face closed topology · ${candidate.enclosedLabels.length}/${labelCount} ${floor.toLowerCase()} room labels enclosed · axis-specific collinear closure H ${closureXmm}mm / V ${closureYmm}mm from sheet figures/schedule · CAD branch spurs removed without changing enclosed area`,
+          `automatic external-face closed topology · ${candidate.enclosedLabels.length}/${labelCount} ${floor.toLowerCase()} room labels enclosed · axis-specific collinear closure H ${closureXmm}mm / V ${closureYmm}mm from sheet figures/schedule with ${(closureEndpointTolerance * 100 - 100).toFixed(0)}% endpoint tolerance · CAD branch spurs removed without changing enclosed area`,
           floor,
         );
         return ref ? [ref] : [];
