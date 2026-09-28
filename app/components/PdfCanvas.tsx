@@ -816,14 +816,8 @@ export default function PdfCanvas({
   const candidateForRoom = (room: Label) => {
     if (!pageSize || !currentScale) return null;
     const maximumOpeningMm = Math.min(
-        2400,
-        Math.max(
-          1200,
-          ...schedule.map((opening) => opening.widthMm || 0),
-          ...dimensions
-            .filter((dimension) => dimension.mm >= 600 && dimension.mm <= 2400)
-            .map((dimension) => dimension.mm),
-        ),
+        1500,
+        Math.max(1200, ...schedule.map((opening) => opening.widthMm || 0)),
       ),
       maxGapX = (maximumOpeningMm / (pageSize.w * currentScale)) * 100,
       maxGapY = (maximumOpeningMm / (pageSize.h * currentScale)) * 100,
@@ -1114,8 +1108,14 @@ export default function PdfCanvas({
   const candidateForGifa = () => {
     if (!pageSize || !currentScale || labels.length < 2) return [];
     const maximumOpeningMm = Math.min(
-        1500,
-        Math.max(1200, ...schedule.map((opening) => opening.widthMm || 0)),
+        2400,
+        Math.max(
+          1200,
+          ...schedule.map((opening) => opening.widthMm || 0),
+          ...dimensions
+            .filter((dimension) => dimension.mm >= 600 && dimension.mm <= 2400)
+            .map((dimension) => dimension.mm),
+        ),
       ),
       maxGapX = (maximumOpeningMm / (pageSize.w * currentScale)) * 100,
       maxGapY = (maximumOpeningMm / (pageSize.h * currentScale)) * 100,
