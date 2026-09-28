@@ -1798,3 +1798,140 @@ export default function PdfCanvas({
                 className="cal-line"
               />
             )}
+          </svg>
+          {labels.map((l, i) => (
+            <button
+              key={i}
+              disabled={readOnly}
+              className={`room-label ${selectedRoom?.text === l.text ? "selected" : ""}`}
+              style={{ left: l.x + "%", top: l.y + "%" }}
+              onClick={(e) => {
+                e.stopPropagation();
+                runTopology(l);
+              }}
+            >
+              {l.text}
+            </button>
+          ))}
+          {doorRefs.map((d, i) => {
+            const row = reconcileOpening(d.text, schedule);
+            return (
+              <span
+                key={"d" + i}
+                className="drawing-tag door"
+                style={{ left: d.x + "%", top: d.y + "%" }}
+                title={
+                  row
+                    ? `${row.tag} · ${row.widthMm}mm · schedule P${row.page}`
+                    : `${d.text} · schedule unresolved`
+                }
+              >
+                {d.text}
+              </span>
+            );
+          })}
+          {windowRefs.map((d, i) => {
+            const row = reconcileOpening(d.text, schedule);
+            return (
+              <span
+                key={"w" + i}
+                className="drawing-tag window"
+                style={{ left: d.x + "%", top: d.y + "%" }}
+                title={
+                  row
+                    ? `${row.tag} · ${row.widthMm}×${row.heightMm}mm · schedule P${row.page}`
+                    : `${d.text} · schedule unresolved`
+                }
+              >
+                {d.text}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+      <div className="measurement-actions">
+        <span>
+          {trace.length} vertices
+          {tool === "count"
+            ? ` · ${trace.length} nr`
+            : tool === "length" && traceLength > 0
+              ? ` · ${traceLength.toFixed(2)} m`
+              : quantity > 0
+                ? ` · ${quantity.toFixed(2)} m² · ${tracePerimeter.toFixed(2)} m perimeter`
+                : ""}
+        </span>
+        {tool === "opening" && (
+          <select
+            value={selectedOpeningTag}
+            onChange={(event) => setSelectedOpeningTag(event.target.value)}
+          >
+            <option value="">Opening tag · nearest visible tag</option>
+            {schedule.map((row) => (
+              <option
+                key={`${row.document}-${row.page}-${row.tag}`}
+                value={row.tag}
+              >
+                {row.tag} · {row.room} · {row.widthMm}
+                {row.heightMm ? `×${row.heightMm}` : ""}mm
+              </option>
+            ))}
+          </select>
+        )}
+        {activeWorkItem.factors?.map((factor, factorIndex) => (
+          <select
+            key={factor}
+            value={workFactorIndices[factorIndex] ?? ""}
+            onChange={(event) =>
+              setWorkFactorIndices((value) => {
+                const next = [...value];
+                next[factorIndex] =
+                  event.target.value === "" ? null : Number(event.target.value);
+                return next;
+              })
+            }
+          >
+            <option value="">{factor} · select drawing dimension</option>
+            {dimensions.slice(0, 80).map((dimension, index) => (
+              <option key={`${factor}-${index}`} value={index}>
+                D{index + 1} · {dimension.mm}mm · P{page}
+              </option>
+            ))}
+          </select>
+        ))}
+        {tool === "room" && selectedRoom && quantity > 0 && (
+          <button onClick={buildRoom}>BUILD EVIDENCE-LINKED ROOM BOQ</button>
+        )}
+        {(tool === "facade" || tool === "opening") && quantity > 0 && (
+          <button onClick={finishFacade}>
+            {tool === "facade" ? "SAVE GROSS FACADE" : "SAVE OPENING DEDUCTION"}
+          </button>
+        )}
+        {facadeGross && (
+          <button onClick={addFacadeBoq}>ADD GROSS + NET FACADE TO BOQ</button>
+        )}
+        {facadeGross && (
+          <span>{openingAreas.length} façade opening(s) retained</span>
+        )}
+        {tool === "gifa" && quantity > 0 && (
+          <button onClick={finishGifa}>SAVE EXTERNAL-FACE GIFA</button>
+        )}
+        {(["area", "length", "count"] as Tool[]).includes(tool) &&
+          tool === workGeometry &&
+          workFactorsReady &&
+          ((workGeometry === "count" && trace.length > 0) ||
+            (workGeometry === "length" && trace.length > 1) ||
+            (workGeometry === "area" && quantity > 0)) && (
+            <button onClick={finishWork}>
+              ADD MEASURED {activeWorkItem.unit === "m³" ? "VOLUME" : "WORK"} TO
+              BOQ
+            </button>
+          )}
+        <span>
+          {schedule.length} schedule openings indexed · {scopeLines.length}{" "}
+          construction-information clauses indexed
+        </span>
+      </div>
+      {error && <div className="pdf-error">{error}</div>}
+    </div>
+  );
+}
